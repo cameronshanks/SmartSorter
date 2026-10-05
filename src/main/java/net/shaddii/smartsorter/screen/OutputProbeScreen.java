@@ -5,6 +5,7 @@ import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.text.Text;
+import net.shaddii.smartsorter.client.ProbeWhitelistPanel;
 import net.shaddii.smartsorter.util.ChestConfig;
 import net.shaddii.smartsorter.widget.ChestConfigPanel;
 
@@ -20,6 +21,7 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
     // ========================================
 
     private ChestConfigPanel configPanel;
+    private ProbeWhitelistPanel whitelistPanel;
     private boolean dropdownOpenCache = false;
     private long lastDropdownCheck = 0;
 
@@ -73,6 +75,11 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
         });
 
         addDrawableChild(configPanel);
+
+        // Whitelist buttons, left of the GUI (only visible for Custom chests)
+        whitelistPanel = new ProbeWhitelistPanel(handler, Math.max(2, x - 122), y + 18);
+        addDrawableChild(whitelistPanel.sortingButton());
+        addDrawableChild(whitelistPanel.editingButton());
 
         //? if >= 1.21.9 {
         // Register mouse events for 1.21.9+
@@ -172,6 +179,10 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
                 /*this.renderSlot(context, this.handler.slots.get(i));
                  *///?}
             }
+        }
+
+        if (whitelistPanel != null) {
+            whitelistPanel.render(context, mouseX, mouseY, delta);
         }
 
         // 5. Dropdowns (always on top)
@@ -295,6 +306,18 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
     // ========================================
     // UTILITY
     // ========================================
+
+    @Override
+    protected void handledScreenTick() {
+        super.handledScreenTick();
+        if (whitelistPanel != null) {
+            whitelistPanel.tick();
+        }
+    }
+
+    public ProbeWhitelistPanel getWhitelistPanel() {
+        return whitelistPanel;
+    }
 
     /**
      * Update the displayed config (e.g., when synced from server)

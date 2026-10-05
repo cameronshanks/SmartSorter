@@ -49,6 +49,13 @@ public class SmartSorterClient implements ClientModInitializer {
         OverflowInputHandler.register();
         registerOverflowInputHandlers();
 
+        // Bulk mode editing on the Chests tab
+        BulkEditController.register();
+
+        // Whitelist state for an open Output Probe screen
+        ClientPlayNetworking.registerGlobalReceiver(WhitelistUpdatePayload.ID,
+                (payload, context) -> context.client().execute(() -> ProbeWhitelistPanel.onServerState(payload)));
+
         // ========================================
         // PACKET HANDLERS (NO DUPLICATES!)
         // ========================================

@@ -1,166 +1,121 @@
-# 🧠 Smart Sorter  
-**Transform your messy storage into an intelligent, automated network!**  
-Smart Sorter brings modular, data-driven sorting to Minecraft with a sleek, intuitive design — no redstone, no commands, just effortless organization.
+**Fork disclosure**
+
+Smart Sorter is a community-maintained fork of slimshaddii’s Smart Sorter Mod. This fork adds workflow improvements and bug fixes, including bulk filter editing, custom item whitelists, and improved intake buffering. Changes were created with AI assistance; please report problems through the issue tracker so they can be reproduced and fixed.
+
+![Banner](https://cdn.modrinth.com/data/cached_images/80248f5e084991f304cb77d67af20894746a18ec.png)
+
+**Automated storage for 0-750 chests**
+
+Smart Sorter connects inputs, storage outputs, and processing machines into one automated network. It routes items, supports prioritized storage, automates furnace and machine inputs and outputs, and collects XP through the Storage Controller.
+
+### At a glance
+
+- **Modular:** Build simple two-chest sorters or large controller-based networks.
+- **Scalable:** Designed for large storage systems, including networks with 750+ connected inventories.
+- **Flexible:** Use general, custom, and prioritized storage rules.
+- **Automation-focused:** Move items, supply machines, and return finished products automatically.
 
 ---
 
-## 🎯 What Does It Do?
+## New Features
 
-Smart Sorter creates a **network-based storage system** that automatically routes, processes, and organizes items across your world.  
-From mining runs to massive modpacks — your items always know exactly where to go.
+### Bulk filter editing
 
-### 🧩 Core Features
+Reconfigure multiple output probes from one Storage Controller instead of opening each probe individually.
+1. Open the Storage Controller.
+2. Open the Chests - **Bulk Edit** panel.
+3. Choose the current filter type and the new filter type.
+4. Apply the change to the selected storage outputs.
+For example, you can change a group of general-storage outputs to custom-storage filters in one operation.
 
-✨ **Automatic Sorting** – Items intelligently find their way to the correct chest or storage block  
-🔍 **Network Search** – Instantly find any item across hundreds of chests  
-🎮 **Simple Setup** – Just 4 blocks and 1 tool — no complex configuration required  
-⚙️ **Process Logic** – Use the new *Process Probe* for crafting or smelting automation  
-📦 **Smart Routing** – Uses category, filter, and priority logic for perfect organization  
-🔗 **Unified Access** – Manage all items from one GUI  
-🧰 **Fully Mod-Compatible** – Works with most vanilla and modded inventories  
+### Custom item whitelists
 
----
+Custom whitelists let an output probe accept only the items you choose.
+1. Set the output probe to **Custom**.
+2. Enable the whitelist.
+3. Enable the whitelist editor.
+4. Hold the item you want to manage and click the output probe.
+5. Click again to remove the item from the whitelist.
+The will be a notification when an item is added or removed.
 
-## 🚀 Quick Start Guide
+### Improved intake buffering
 
-### **1. Craft Your System**
-- 🧩 **Storage Controller** — your network’s brain and main access terminal  
-- 📤 **Intake Block** — pulls nearby items into your network  
-- 🎯 **Output Probe** — sends items to connected chests based on filters  
-- ⚙️ **Process Probe** — automates item handling or processing logic  
-- 🛠️ **Linking Tool** — connects all components together  
-
----
-
-### **2. Set It Up**
-1. Place your **Storage Controller**  
-2. Place **Intake**, **Output**, and **Process Probes** near your chests or machines  
-3. Right-click the **Controller** with the **Linking Tool**  
-4. Right-click each probe to link them  
-
-✅ Done — your network is now live!
+The Intake Block now skips items that cannot currently be routed to a valid destination instead of remaining stuck in the input buffer.
 
 ---
 
-### **3. Configure Probes**
-- **Filter Mode** → Assigns items to specific chests  
-- **Accept All Mode** → Catch-all storage for unfiltered items  
-- **Process Mode** → Automates crafting, smelting, or filtering (using datapack configs)  
+## Core Components
 
-> 💡 Shift+Right-click with the Linking Tool to cycle probe modes.
-
----
-
-### **4. Use Your Network**
-- Right-click the **Storage Controller** to open its GUI  
-- **Shift+Click** items to deposit  
-- **Click items** to retrieve  
-- **Search** by name to instantly locate items  
-- **Collect XP** directly from processing  
-
-**Congratulations — your fully automated storage network is online!** 🧠✨  
+- **Storage Controller** — The central hub for network management and the XP bank.
+- **Linking Tool** — Connects intakes, output probes, process probes, and controllers.
+- **Intake Block** — Pulls items from connected inventories into the network.
+- **Output Probe** — Pushes items into connected inventories according to filters and priorities.
+- **Process Probe** — Controls furnaces and machines using redstone logic.
 
 ---
 
-## 🧱 Block Overview
+## How the Network Works
 
-| Block / Item | Description |
-|---------------|-------------|
-| 🧠 **Storage Controller** | Central hub — manages network, sorting, and access. |
-| 📥 **Intake Block** | Pulls items into the network automatically. |
-| 🎯 **Output Probe** | Sends specific items to target chests. |
-| ⚙️ **Process Probe** | Handles processing and advanced sorting. |
-| 🛠️ **Linking Tool** | Connects blocks together. |
-
----
-
-## 🧩 Mod Compatibility
-
-✅ **Vanilla Chests, Barrels, Shulker Boxes**  
-✅ **Iron Chests (All Tiers)**  
-✅ **Sophisticated Storage (All Variants)**  
-✅ **Storage Drawers & Controller Blocks**  
-✅ **Any Inventory from Modded Containers**  
+1. An **Intake Block** pulls items from an inventory.
+2. The network checks filters, whitelists, and storage priorities.
+3. An **Output Probe** sends each item to the best available destination.
+4. A **Process Probe** can supply a furnace or machine with fuel and materials.
+    - Finished products return to the network and are routed to prioritized storage.
+    - XP generated by connected furnaces is accumulated in the Storage Controller.
 
 ---
 
-## ✨ Perfect For...
+## Quick Start Guide
 
-- 🏗️ **Mega Build Projects** – Keep thousands of blocks organized  
-- ⛏️ **Mining Expeditions** – Auto-sort all your ores and drops  
-- 🧙 **Modded Playthroughs** – Handle hundreds of custom items effortlessly  
-- 🏰 **Survival Bases** – Centralized storage and automation  
-- 📦 **Item Halls / Factories** – Full network access from one terminal  
+### 1. Simple two-chest sorter — no controller required
 
----
+```
+[Input Chest] → [Intake Block] … [Output Probe] → [Target Chest]
+```
+1. Place the Intake Block beside the input chest.
+2. Place the Output Probe beside the target chest.
+3. Right-click the Intake Block with the Linking Tool.
+4. Right-click the Output Probe to link the two components.
+5. Right-click the Output Probe to configure its item filters.
 
-## 💡 Pro Tips
+### 2. Controller-based storage network
 
-### **Organization Strategies**
-- **By Category** — Blocks, Ores, Food, Tools (coming as filter presets)  
-- **By Frequency** — Common → large chests, Rare → small chests  
-- **Always Have Overflow** — at least one “Accept All” chest per network  
+1. Place a Storage Controller.
+2. Shift-click the controller with the Linking Tool.
+3. Click your Intake Blocks, Output Probes, and Process Probes.
+4. Open the controller to search the network and configure storage priorities.
+5. Use dedicated output probes and custom whitelists for items that need precise routing.
 
-### **Performance Tips**
-- 🔗 Group probes close to their target inventories  
-- 💾 One Controller can handle **50+ probes** easily  
-- ⚡ Avoid redundant links — one probe per container is ideal  
+### 3. Redstone-powered processing
 
----
-
-## 🔄 Recent Updates (v2.0.0+)
-
-- 🧱 Added **Intake Block**  
-- ⚙️ Added **Process Probe** for automation & filtering  
-- 🔄 Full **Networking Refactor** — stable multiplayer sync  
-- 🎨 New **Creative Tab Integration**  
-- 💾 Added **CategoryManager** for datapack-based filters  
-- 🔊 XP collection sound & on-screen feedback  
-- 🧰 Registry cleanup using `Identifier.of()` and proper key handling  
+1. Place a Process Probe on a furnace or supported machine.
+2. Link it to the Storage Controller.
+3. Supply a redstone signal to activate the probe.
+4. The network provides fuel and raw materials, then routes finished products to storage.
 
 ---
 
-## 🐛 Support & Feedback
+## Compatibility
 
-### **Found a Bug?**
-- 🐛 [Report it on GitHub](https://github.com/slimshaddii/SmartSorter/issues)
-- Include: Minecraft version, mod version, crash log, and steps to reproduce  
-
-### **Want a Feature?**
-- 💡 [Submit a suggestion](https://github.com/slimshaddii/SmartSorter/issues)  
-- 🗳️ Vote on ideas and improvements  
-
----
-
-## ❤️ Show Support
-
-If you enjoy Smart Sorter:
-
-⭐ **Leave a rating** on Modrinth  
-💬 **Share feedback or screenshots**  
-🎥 **Showcase your setup** on YouTube or Reddit  
-☕ **Support development** on [Ko-fi](https://ko-fi.com/shaddii)  
+Smart Sorter is designed to work with:
+- **Vanilla chests, barrels, and shulker boxes**
+- **Iron Chests**
+- **Sophisticated Storage**
+- **Storage Drawers and controller blocks**
+- **Other modded inventories that expose a compatible inventory interface**
 
 ---
 
-## 📜 License
+## Support and Feedback
 
-Smart Sorter is licensed under **MIT** — use it freely in:
-- ✅ Modpacks  
-- ✅ Servers  
-- ✅ Personal or public projects  
-- ✅ Forks & improvements  
+- **Found a bug?** Report it on GitHub
+- **Have a feature suggestion?** Submit a suggestion
+When reporting an issue, include your Minecraft version, mod-loader version, Smart Sorter version, relevant mods, a description of the setup, and any error log or reproduction steps.
 
 ---
 
-## 🙏 Credits
+## Credits
 
-**Developer:** SlimShaddii  
-**Special Thanks:**  
-- Tom’s Simple Storage — inspiration for early system design  
-- Fabric Community — for ongoing support and tooling  
-
----
-
-**Automation made simple. Storage made smart.**  
-✨ *Download now and let your items sort themselves!* 🚀
+- **Original developer:** SlimShaddii
+- **Special thanks:** Fizzy, for the block designs.
+- **Original project:** Smart Sorter Mod on Modrinth

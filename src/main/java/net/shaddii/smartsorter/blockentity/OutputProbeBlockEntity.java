@@ -7,9 +7,12 @@ import net.fabricmc.fabric.api.transfer.v1.item.ItemStorage;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
 import net.fabricmc.fabric.api.transfer.v1.storage.Storage;
 import net.minecraft.block.BlockState;
+import net.minecraft.block.ChestBlock;
 import net.minecraft.block.entity.BlockEntity;
+import net.minecraft.block.enums.ChestType;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.inventory.DoubleInventory;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
@@ -21,16 +24,22 @@ import net.minecraft.network.packet.s2c.play.BlockEntityUpdateS2CPacket;
 import net.minecraft.registry.RegistryWrapper;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.world.World;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.block.OutputProbeBlock;
+import net.shaddii.smartsorter.chunk.ChunkKeeper;
+import net.shaddii.smartsorter.config.SmartSorterConfig;
 import net.shaddii.smartsorter.screen.OutputProbeScreenHandler;
 import net.shaddii.smartsorter.util.Category;
 import net.shaddii.smartsorter.util.CategoryManager;
+import net.shaddii.smartsorter.util.ChangeCounter;
 import net.shaddii.smartsorter.util.ChestConfig;
+import net.shaddii.smartsorter.util.ChestSnapshot;
+import net.shaddii.smartsorter.util.RoutingIndexEpoch;
 import net.shaddii.smartsorter.util.SortUtil;
 //? if >=1.21.8 {
 import net.minecraft.nbt.NbtOps;
@@ -148,9 +157,16 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     private ChestConfig cachedConfig = null;
     private long cacheValidUntil = 0;
     private static final long CACHE_DURATION = 20;
-    private Boolean cachedHasSpace = null;
-    private long spaceCheckTime = 0;
     private boolean needsInitialSync = true;
+
+    // Target caches (see getTargetPos / getTargetInventory / accepts)
+    private BlockState targetPosForState;
+    private BlockPos cachedTargetPos;
+    private Inventory cachedInventory;
+    private BlockEntity cachedPrimary;
+    private BlockEntity cachedSecondary;
+    private BlockState cachedInventoryForState;
+    private final ChestSnapshot snapshot = new ChestSnapshot();
 
     // ========================================
     // CONSTRUCTOR
@@ -233,7 +249,9 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     private void validateLinkedBlocks() {
         if (world == null) return;
 
-        boolean removedAny = linkedBlocks.removeIf(blockPos -> {  // ← ADD 'boolean removedAny ='
+        // Links in unloaded chunks are kept: looking them up would force-load the chunk.
+        boolean removedAny = linkedBlocks.removeIf(blockPos -> {
+            if (!world.isChunkLoaded(blockPos)) return false;
             BlockEntity be = world.getBlockEntity(blockPos);
             return !(be instanceof StorageControllerBlockEntity || be instanceof IntakeBlockEntity);
         });
@@ -265,6 +283,9 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
         // Try controller first
         for (BlockPos blockPos : linkedBlocks) {
             if (world == null) break;
+            // A controller in an unloaded chunk is skipped (falls back to the
+            // local copy) instead of being force-loaded.
+            if (!world.isChunkLoaded(blockPos)) continue;
             BlockEntity be = world.getBlockEntity(blockPos);
             if (be instanceof StorageControllerBlockEntity controller) {
                 ChestConfig controllerConfig = controller.getChestConfig(targetPos);
@@ -301,8 +322,23 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     public void invalidateConfigCache() {
         cachedConfig = null;
         cacheValidUntil = 0;
-        cachedHasSpace = null;
-        spaceCheckTime = 0;
+        // Filter edits and bulk edits reach the probe through here.
+        snapshot.invalidate();
+    }
+
+    /** Drops the cached target position, inventory and contents snapshot. */
+    public void invalidateTargetCache() {
+        targetPosForState = null;
+        cachedTargetPos = null;
+        clearInventoryCache();
+    }
+
+    private void clearInventoryCache() {
+        cachedInventory = null;
+        cachedPrimary = null;
+        cachedSecondary = null;
+        cachedInventoryForState = null;
+        snapshot.invalidate();
     }
 
     /**
@@ -320,7 +356,8 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
 
         this.localChestConfig.updateHiddenPriority();
 
-        invalidateConfigCache(); // ← ADD THIS
+        invalidateConfigCache();
+        RoutingIndexEpoch.bump();
         markDirty();
 
         if (world != null) {
@@ -441,6 +478,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
         if (config == null) return;
 
         this.localChestConfig = config.copy();
+        RoutingIndexEpoch.bump();
         markDirty();
 
         // Sync to world for client updates
@@ -476,10 +514,15 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     // STORAGE ACCESS
     // ========================================
 
+    /** Cached per block-state object: a rotation swaps the state, so it's picked up for free. */
     public BlockPos getTargetPos() {
         if (world == null) return null;
-        Direction face = getCachedState().get(OutputProbeBlock.FACING);
-        return pos.offset(face);
+        BlockState state = getCachedState();
+        if (state != targetPosForState) {
+            cachedTargetPos = pos.offset(state.get(OutputProbeBlock.FACING));
+            targetPosForState = state;
+        }
+        return cachedTargetPos;
     }
 
     public Storage<ItemVariant> getTargetStorage() {
@@ -500,66 +543,146 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
         return null;
     }
 
+    /**
+     * The target chest's inventory, cached until a neighbor update
+     * (OutputProbeBlock.neighborUpdate), a data reload, a block-state change,
+     * or either backing block entity being removed/unloaded. "Nothing there"
+     * is never cached.
+     *
+     * Never reads a block in an unloaded chunk (that forces a synchronous
+     * chunk load): returns null so the probe is skipped this pass, and asks
+     * the chunk keeper for that chunk if keepChunksLoaded is on.
+     */
     public Inventory getTargetInventory() {
         if (world == null) return null;
 
-        Direction face = getCachedState().get(OutputProbeBlock.FACING);
-        BlockPos targetPos = pos.offset(face);
+        BlockState probeState = getCachedState();
+        Inventory cached = cachedInventory;
+        if (cached != null
+                && cachedInventoryForState == probeState
+                && !cachedPrimary.isRemoved()
+                && (cachedSecondary == null || !cachedSecondary.isRemoved())) {
+            return cached;
+        }
+        clearInventoryCache();
+
+        BlockPos targetPos = getTargetPos();
+        if (!world.isChunkLoaded(targetPos)) {
+            requestChunk(targetPos);
+            return null;
+        }
+
         BlockState targetState = world.getBlockState(targetPos);
 
-        // Handle regular chests
-        if (targetState.getBlock() instanceof net.minecraft.block.ChestBlock chestBlock) {
-            Inventory chestInv = net.minecraft.block.ChestBlock.getInventory(chestBlock, targetState, world, targetPos, true);
+        // Handle regular chests (single or double)
+        if (targetState.getBlock() instanceof ChestBlock chestBlock) {
+            BlockPos partnerPos = null;
+            if (targetState.contains(ChestBlock.CHEST_TYPE) && targetState.get(ChestBlock.CHEST_TYPE) != ChestType.SINGLE) {
+                partnerPos = targetPos.offset(ChestBlock.getFacing(targetState));
+                if (!world.isChunkLoaded(partnerPos)) {
+                    // ChestBlock.getInventory would read the other half and force-load its chunk.
+                    requestChunk(partnerPos);
+                    return null;
+                }
+            }
+
+            Inventory chestInv = ChestBlock.getInventory(chestBlock, targetState, world, targetPos, true);
             if (chestInv != null) {
+                BlockEntity primary = world.getBlockEntity(targetPos);
+                BlockEntity secondary = chestInv instanceof DoubleInventory && partnerPos != null
+                        ? world.getBlockEntity(partnerPos) : null;
+                // Only cache when every backing block entity was found, so the
+                // isRemoved() checks above really cover the inventory.
+                if (primary != null && (secondary != null || !(chestInv instanceof DoubleInventory))) {
+                    storeInventory(chestInv, primary, secondary, probeState);
+                }
                 return chestInv;
             }
         }
 
         // Handle other inventories
-        BlockEntity be = world.getBlockEntity(targetPos);
-        if (be instanceof Inventory inv) {
+        if (world.getBlockEntity(targetPos) instanceof Inventory inv) {
+            storeInventory(inv, (BlockEntity) inv, null, probeState);
             return inv;
         }
 
         return null;
     }
 
+    private void storeInventory(Inventory inv, BlockEntity primary, BlockEntity secondary, BlockState probeState) {
+        cachedInventory = inv;
+        cachedPrimary = primary;
+        cachedSecondary = secondary;
+        cachedInventoryForState = probeState;
+    }
+
+    private void requestChunk(BlockPos chunkOf) {
+        if (SmartSorterConfig.keepChunksLoaded && world instanceof ServerWorld serverWorld) {
+            ChunkKeeper.requestExtraChunk(serverWorld, pos, chunkOf);
+        }
+    }
+
+    /** Sum of the backing block entities' markDirty() counters; MIN_VALUE when not cached. */
+    private long contentsVersion(Inventory inv) {
+        if (inv != cachedInventory || cachedPrimary == null) {
+            return Long.MIN_VALUE;
+        }
+        long version = ((ChangeCounter) cachedPrimary).smartsorter$getChangeCount();
+        if (cachedSecondary != null) {
+            version += ((ChangeCounter) cachedSecondary).smartsorter$getChangeCount();
+        }
+        return version;
+    }
+
+    /**
+     * What the target chest holds, rebuilt only when the chest changed (its
+     * markDirty() counter moved), the inventory was re-resolved, the config
+     * cache was invalidated, or chestCacheMaxAgeTicks passed.
+     */
+    private ChestSnapshot currentSnapshot(Inventory inv) {
+        long now = world != null ? world.getTime() : 0L;
+        if (!snapshot.isCurrent(inv, contentsVersion(inv), now, SmartSorterConfig.chestCacheMaxAgeTicks)) {
+            snapshot.rebuild(inv, now);
+            // Read after the scan: generating loot can mark the chest dirty.
+            snapshot.setVersion(contentsVersion(inv));
+        }
+        return snapshot;
+    }
+
+    /** Whether the target chest holds any item (answered from the snapshot). */
+    public boolean targetHasItems() {
+        Inventory inv = getTargetInventory();
+        return inv != null && !currentSnapshot(inv).isEmpty();
+    }
+
     // ========================================
     // ITEM ACCEPTANCE LOGIC
     // ========================================
 
+    /**
+     * Whether this probe's chest takes {@code incoming}. Answered from the
+     * contents snapshot with set lookups - no slot scans, no allocations.
+     *
+     * A chest counts as full for an item only when no slot is empty AND no
+     * slot holds that exact item (components included) below its max stack,
+     * so a chest of single placeholder items keeps accepting those items.
+     */
     public boolean accepts(ItemVariant incoming) {
         if (world == null) return false;
 
-        // OPTIMIZATION: Check space cache first
-        long currentTime = world.getTime();
-        if (cachedHasSpace != null && currentTime == spaceCheckTime) {
-            if (!cachedHasSpace) return false;
-        }
-
         Inventory inv = getTargetInventory();
-        if (inv == null) {
-            cachedHasSpace = false;
-            spaceCheckTime = currentTime;
-            return false;
-        }
+        if (inv == null) return false;
 
-        // Quick space check with early exit
-        boolean hasSpace = hasSpaceInInventoryFast(inv, incoming, 1);
-        if (!hasSpace) {
-            cachedHasSpace = false;
-            spaceCheckTime = currentTime;
-            return false;
-        }
-
-        cachedHasSpace = true;
-        spaceCheckTime = currentTime;
+        ChestSnapshot contents = currentSnapshot(inv);
+        if (!contents.hasRoomFor(incoming)) return false;
 
         // Now check filter rules
         ChestConfig chestConfig = getChestConfig();
         if (chestConfig != null) {
-            CategoryManager categoryManager = CategoryManager.getInstance();
-            Category itemCategory = categoryManager.categorize(incoming.getItem());
+            // Whitelist overlay on CUSTOM chests: exactly the listed items
+            if (chestConfig.whitelistEnabled) {
+                return chestConfig.getWhitelist().contains(incoming.getItem());
+            }
 
             switch (chestConfig.filterMode) {
                 case NONE:
@@ -568,15 +691,23 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
 
                 case CATEGORY:
                 case CATEGORY_AND_PRIORITY:
-                case OVERFLOW:
+                case OVERFLOW: {
+                    Category itemCategory = CategoryManager.getInstance().categorize(incoming.getItem());
                     return itemCategory.equals(chestConfig.filterCategory) ||
                             chestConfig.filterCategory.equals(Category.ALL);
+                }
 
-                case BLACKLIST:
+                case BLACKLIST: {
+                    Category itemCategory = CategoryManager.getInstance().categorize(incoming.getItem());
                     return !itemCategory.equals(chestConfig.filterCategory);
+                }
 
                 case CUSTOM:
-                    return acceptsByChestContents(inv, incoming, chestConfig.strictNBTMatch);
+                    // Chest must already hold a match (an empty chest accepts
+                    // nothing); room was checked above.
+                    return chestConfig.strictNBTMatch
+                            ? contents.containsVariant(incoming)
+                            : contents.containsItem(incoming.getItem());
 
                 default:
                     return false;
@@ -592,43 +723,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
             if (useTags) {
                 return SortUtil.acceptsByInventoryTags(inv, incoming, requireAllTags);
             }
-
-            // OPTIMIZED: Early exit on first match
-            for (int i = 0; i < inv.size(); i++) {
-                ItemStack stack = inv.getStack(i);
-                if (stack.isEmpty()) continue;
-
-                ItemVariant present = ItemVariant.of(stack);
-                if (ignoreComponents) {
-                    if (present.isOf(incoming.getItem())) return true;
-                } else {
-                    if (present.equals(incoming)) return true;
-                }
-            }
-            return false;
-        }
-
-        return false;
-    }
-
-    private boolean hasSpaceInInventoryFast(Inventory inv, ItemVariant variant, int amount) {
-        if (inv == null) return false;
-
-        int invSize = inv.size();
-        ItemStack variantStack = variant.toStack(1);
-
-        // SINGLE PASS - check for matching stacks OR empty slots
-        for (int i = 0; i < invSize; i++) {
-            ItemStack stack = inv.getStack(i);
-
-            if (stack.isEmpty()) {
-                return true; // Found empty slot
-            } else if (ItemStack.areItemsAndComponentsEqual(stack, variantStack)) {
-                int maxStack = Math.min(stack.getMaxCount(), inv.getMaxCountPerStack());
-                if (stack.getCount() < maxStack) {
-                    return true; // Can stack
-                }
-            }
+            return ignoreComponents ? contents.containsItem(incoming.getItem()) : contents.containsVariant(incoming);
         }
 
         return false;
@@ -636,84 +731,13 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
 
     public boolean contains(ItemVariant variant) {
         if (world == null) return false;
-
         Inventory inv = getTargetInventory();
-        if (inv == null) return false;
-
-        for (int i = 0; i < inv.size(); i++) {
-            ItemStack stack = inv.getStack(i);
-            if (stack.isEmpty()) continue;
-
-            ItemVariant stackVariant = ItemVariant.of(stack);
-            if (stackVariant.equals(variant)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private boolean acceptsByChestContents(Inventory inv, ItemVariant incoming, boolean strictNBT) {
-        if (inv == null) return false;
-
-        boolean foundAnyItem = false;
-        boolean foundMatch = false;
-
-        for (int i = 0; i < inv.size(); i++) {
-            ItemStack stack = inv.getStack(i);
-            if (stack.isEmpty()) continue;
-
-            foundAnyItem = true;
-
-            if (strictNBT) {
-                // Exact match including NBT
-                ItemVariant existingVariant = ItemVariant.of(stack);
-                if (existingVariant.equals(incoming)) {
-                    foundMatch = true;
-                    break;
-                }
-            } else {
-                // Only match item type, ignore NBT
-                if (stack.getItem() == incoming.getItem()) {
-                    foundMatch = true;
-                    break;
-                }
-            }
-        }
-
-        // Empty chest in CUSTOM mode rejects everything
-        if (!foundAnyItem) {
-            return false; // Custom filter mode: empty chest accepts nothing
-        }
-
-        // Found match - now check if there's space
-        return foundMatch && hasSpaceInInventory(inv, incoming, 1);
-    }
-
-    private boolean hasSpaceInInventory(Inventory inv, ItemVariant variant, int amount) {
-        if (inv == null) return false;
-
-        int invSize = inv.size();
-        for (int i = 0; i < invSize; i++) {
-            ItemStack stack = inv.getStack(i);
-
-            if (stack.isEmpty()) {
-                return true;
-            } else if (ItemStack.areItemsAndComponentsEqual(stack, variant.toStack(1))) {
-                int maxStack = Math.min(stack.getMaxCount(), inv.getMaxCountPerStack());
-                int canAdd = maxStack - stack.getCount();
-                if (canAdd > 0) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+        return inv != null && currentSnapshot(inv).containsVariant(variant);
     }
 
     public boolean hasSpace(ItemVariant variant, int amount) {
         Inventory inv = getTargetInventory();
-        return hasSpaceInInventory(inv, variant, amount);
+        return inv != null && currentSnapshot(inv).hasRoomFor(variant);
     }
 
     // ========================================
@@ -726,6 +750,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
             case ACCEPT_ALL -> ProbeMode.FILTER;
             case PRIORITY -> ProbeMode.FILTER;
         };
+        RoutingIndexEpoch.bump();
         markDirty();
     }
 
@@ -768,6 +793,11 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     // ========================================
 
     public void onRemoved(World world) {
+        invalidateTargetCache();
+        RoutingIndexEpoch.bump();
+        if (world instanceof ServerWorld serverWorld) {
+            ChunkKeeper.unregister(serverWorld, pos);
+        }
         if (world == null || world.isClient()) return;
 
         BlockPos targetPos = getTargetPos();
@@ -970,6 +1000,9 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     public void readData(ReadView view) {
         super.readData(view);
         readProbeData(view);
+        // Placed or chunk loaded: re-resolve the target and rebuild routing indexes.
+        invalidateTargetCache();
+        RoutingIndexEpoch.bump();
     }
     //?} else {
     /*private void writeProbeData(NbtCompound nbt) {

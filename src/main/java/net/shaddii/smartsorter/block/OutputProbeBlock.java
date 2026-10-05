@@ -8,6 +8,7 @@ import net.minecraft.block.entity.BlockEntityTicker;
 import net.minecraft.block.entity.BlockEntityType;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemPlacementContext;
 import net.minecraft.item.ItemStack;
 import net.minecraft.server.world.ServerWorld;
@@ -25,13 +26,20 @@ import net.minecraft.util.shape.VoxelShapes;
 import net.minecraft.world.BlockRenderView;
 import net.minecraft.world.BlockView;
 import net.minecraft.world.World;
+import net.minecraft.world.block.WireOrientation;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.blockentity.EnderChestProbeBlockEntity;
 import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 import net.shaddii.smartsorter.item.LinkingToolItem;
+import net.shaddii.smartsorter.network.WhitelistBroadcast;
+import net.shaddii.smartsorter.network.WhitelistNetworking;
 import net.shaddii.smartsorter.util.ChestConfig;
+import net.shaddii.smartsorter.util.RoutingIndexEpoch;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.HashSet;
+import java.util.Set;
 
 public class OutputProbeBlock extends BlockWithEntity {
     // ========================================
@@ -166,6 +174,12 @@ public class OutputProbeBlock extends BlockWithEntity {
             return ActionResult.SUCCESS;
         }
 
+        // Whitelist editing: while the chest's Editing toggle is on, using an
+        // item on the probe adds/removes it from the whitelist instead of testing it.
+        if (!player.isSneaking() && !heldStack.isEmpty() && toggleWhitelistItem(world, probe, player, heldStack)) {
+            return ActionResult.SUCCESS;
+        }
+
         // Using an item on the probe tests if it's accepted
         if (!player.isSneaking() && !heldStack.isEmpty()) {
             ItemVariant heldVariant = ItemVariant.of(heldStack);
@@ -178,6 +192,51 @@ public class OutputProbeBlock extends BlockWithEntity {
         }
 
         return ActionResult.PASS;
+    }
+
+    /**
+     * Adds or removes the held item from the chest's whitelist if that chest
+     * is a Custom chest with whitelist editing turned on. Returns false (and
+     * changes nothing) otherwise, so the normal Accepted/Rejected test runs.
+     */
+    private static boolean toggleWhitelistItem(World world, OutputProbeBlockEntity probe, PlayerEntity player, ItemStack heldStack) {
+        BlockPos controllerPos = probe.getLinkedController();
+        BlockPos chestPos = probe.getTargetPos();
+        if (controllerPos == null || chestPos == null) return false;
+        if (!(world.getBlockEntity(controllerPos) instanceof StorageControllerBlockEntity controller)) return false;
+
+        ChestConfig config = controller.getChestConfig(chestPos);
+        if (config == null || config.filterMode != ChestConfig.FilterMode.CUSTOM || !config.whitelistEditMode) {
+            return false;
+        }
+
+        Item item = heldStack.getItem();
+        Set<Item> items = new HashSet<>(config.getWhitelist());
+        boolean added = items.add(item);
+        if (!added) {
+            items.remove(item);
+        }
+        config.setWhitelist(items);
+        controller.markDirty();
+        RoutingIndexEpoch.bump(); // filter edit
+
+        String itemName = item.getName(heldStack).getString();
+        player.sendMessage(Text.literal(itemName + ": " + (added ? "§aAdded to whitelist" : "§cRemoved from whitelist")), true);
+
+        if (world instanceof ServerWorld serverWorld) {
+            WhitelistBroadcast.toViewers(serverWorld.getServer(), controller, WhitelistNetworking.snapshotOf(chestPos, config));
+        }
+        return true;
+    }
+
+    /** The target chest being broken, placed, replaced or joining/leaving a double chest. */
+    @Override
+    protected void neighborUpdate(BlockState state, World world, BlockPos pos, Block sourceBlock,
+                                  @Nullable WireOrientation wireOrientation, boolean notify) {
+        super.neighborUpdate(state, world, pos, sourceBlock, wireOrientation, notify);
+        if (world.getBlockEntity(pos) instanceof OutputProbeBlockEntity probe) {
+            probe.invalidateTargetCache();
+        }
     }
 
     // ========================================

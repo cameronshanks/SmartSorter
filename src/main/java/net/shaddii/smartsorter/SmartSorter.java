@@ -41,6 +41,8 @@ import net.minecraft.util.math.BlockPos;
 import net.shaddii.smartsorter.block.*;
 import net.shaddii.smartsorter.blockentity.*;
 import net.shaddii.smartsorter.item.LinkingToolItem;
+import net.shaddii.smartsorter.chunk.ChunkKeeper;
+import net.shaddii.smartsorter.config.SmartSorterConfig;
 import net.shaddii.smartsorter.network.*;
 import net.shaddii.smartsorter.screen.OutputProbeScreenHandler;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
@@ -85,6 +87,9 @@ public class SmartSorter implements ModInitializer {
 
     @Override
     public void onInitialize() {
+        SmartSorterConfig.load();
+        ChunkKeeper.init();
+
         registerBlocks();
         registerItems();
         registerBlockEntities();
@@ -93,6 +98,7 @@ public class SmartSorter implements ModInitializer {
         registerCreativeTab();
         registerNetworkPayloads();
         registerNetworkHandlers();
+        WhitelistNetworking.register();
         registerEvents();
         ChunkedSorter.init();
 

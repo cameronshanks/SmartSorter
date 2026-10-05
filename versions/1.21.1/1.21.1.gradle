@@ -1,8 +1,0 @@
-loom {
-    version = "1.15-SNAPSHOT"
-}
-
-property "minecraft_version", "1.21.1"
-property "yarn_mappings", "1.21.1+build.3"
-property "loader_version", "0.17.3"
-property "fabric_version", "0.116.7+1.21.1"

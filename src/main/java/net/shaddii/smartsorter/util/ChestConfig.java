@@ -3,6 +3,7 @@ package net.shaddii.smartsorter.util;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.ChestBlockEntity;
 import net.minecraft.inventory.Inventory;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.network.RegistryByteBuf;
@@ -12,7 +13,9 @@ import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class ChestConfig {
     public final BlockPos position;
@@ -29,6 +32,36 @@ public class ChestConfig {
     public int cachedFullness = -1;
 
     public transient List<ItemStack> previewItems = new ArrayList<>();
+
+    /*
+     * Whitelist overlay for CUSTOM chests. A whitelist chest still reports
+     * filterMode == CUSTOM everywhere; OutputProbeBlockEntity.accepts() checks
+     * whitelistEnabled first and then accepts exactly the listed items instead
+     * of "items already in the chest". Edited from the Output Probe screen's
+     * Sorting/Editing buttons and by right-clicking the probe with an item
+     * while editing is on. Synced with the Whitelist* payloads, persisted by
+     * StorageControllerBlockEntity.
+     */
+    public boolean whitelistEnabled = false;
+    /** Right-clicking the probe with an item adds/removes it instead of testing it. */
+    public boolean whitelistEditMode = false;
+    private Set<Item> whitelist = new HashSet<>();
+
+    /** Never null. Treat as read-only; use setWhitelist() to change it. */
+    public Set<Item> getWhitelist() {
+        return whitelist;
+    }
+
+    /** Stores a copy, so callers can't change the set behind accepts()' back. */
+    public void setWhitelist(Set<Item> items) {
+        this.whitelist = new HashSet<>(items);
+    }
+
+    public void copyWhitelistFrom(ChestConfig other) {
+        this.whitelistEnabled = other.whitelistEnabled;
+        this.whitelistEditMode = other.whitelistEditMode;
+        this.whitelist = new HashSet<>(other.whitelist);
+    }
 
     public enum FilterMode {
         NONE("General Storage", "Accepts any items"),
@@ -373,6 +406,7 @@ public class ChestConfig {
         copied.strictNBTMatch = this.strictNBTMatch;
         copied.hiddenPriority = this.hiddenPriority;
         copied.simplePrioritySelection = this.simplePrioritySelection;
+        copied.copyWhitelistFrom(this);
 
         return copied;
     }

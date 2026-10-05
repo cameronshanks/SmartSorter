@@ -167,14 +167,20 @@ public class ChestConfigManager {
                                   StorageControllerBlockEntity controller) {
         ChestConfig oldConfig = chestConfigs.get(position);
 
+        // The incoming config is usually a brand-new object (ChestConfigPanel's
+        // priority field builds one with "new ChestConfig(...)", and network
+        // payloads don't carry the whitelist), so carry the whitelist over.
+        if (oldConfig != null && oldConfig != config) {
+            config.copyWhitelistFrom(oldConfig);
+        }
+
         if (oldConfig == null) {
             // New chest - assign priority
             Map<BlockPos, Integer> newPriorities = priorityManager.addChest(position, config, chestConfigs);
             applyPriorityUpdates(world, newPriorities);
 
         } else if (config.simplePrioritySelection != null &&
-                oldConfig.simplePrioritySelection != config.simplePrioritySelection &&
-                config.filterMode != ChestConfig.FilterMode.CUSTOM) {
+                oldConfig.simplePrioritySelection != config.simplePrioritySelection) {
             // SimplePriority dropdown changed to a non-null value (e.g., HIGHEST, HIGH, etc.)
             Map<BlockPos, Integer> newPriorities = priorityManager.updateChestPriority(
                     position, config.simplePrioritySelection, chestConfigs
@@ -182,8 +188,7 @@ public class ChestConfigManager {
             applyPriorityUpdates(world, newPriorities);
 
         } else if (config.simplePrioritySelection == null &&
-                config.priority != oldConfig.priority &&
-                config.filterMode != ChestConfig.FilterMode.CUSTOM) {
+                config.priority != oldConfig.priority) {
             // Manual numeric priority change (SimplePriority is null, user typed a number)
             Map<BlockPos, Integer> newPriorities = priorityManager.setManualPriority(
                     position, config.priority, chestConfigs

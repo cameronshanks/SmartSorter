@@ -3,9 +3,13 @@
   "id": "smartsorter",
   "version": "${version}",
   "name": "Smart Sorter",
-  "description": "Smart inventory sorting and management",
-  "authors": ["Shaddii"],
-  "contact": {},
+  "description": "Smart inventory sorting and management. Maintained fork of Smart Sorter by Shaddii, with bulk chest editing, whitelist filters, faster routing, a non-blocking intake buffer and optional chunk keeping.",
+  "authors": ["Shaddii", "Cameron Shanks"],
+  "contact": {
+    "homepage": "https://github.com/cameronshanks/SmartSorter",
+    "sources": "https://github.com/cameronshanks/SmartSorter",
+    "issues": "https://github.com/cameronshanks/SmartSorter/issues"
+  },
   "license": "MIT",
   "icon": "assets/smartsorter/icon.png",
 

@@ -52,6 +52,10 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     }
 
     private Tab currentTab = Tab.STORAGE;
+
+    public Tab getCurrentTab() {
+        return currentTab;
+    }
     private final Map<Tab, TabComponent> tabs = new HashMap<>();
     private final List<ButtonWidget> tabButtons = new ArrayList<>();
 

@@ -20,6 +20,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.blockentity.controller.*;
+import net.shaddii.smartsorter.chunk.ChunkKeeper;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
 import net.shaddii.smartsorter.util.*;
 import org.jetbrains.annotations.Nullable;
@@ -143,7 +144,10 @@ public class StorageControllerBlockEntity extends BlockEntity
     private void validateLinks() {
         probeRegistry.validate(world);
 
+        // Intakes in unloaded chunks stay linked: looking them up would
+        // force a synchronous chunk load.
         linkedIntakes.removeIf(intakePos -> {
+            if (!world.isChunkLoaded(intakePos)) return false;
             BlockEntity be = world.getBlockEntity(intakePos);
             return !(be instanceof IntakeBlockEntity);
         });
@@ -386,6 +390,7 @@ public class StorageControllerBlockEntity extends BlockEntity
             }
         }
 
+        RoutingIndexEpoch.bump(); // filter / bulk edit
         networkDirty = true;
         markDirty();
         updateListeners();
@@ -394,6 +399,7 @@ public class StorageControllerBlockEntity extends BlockEntity
     public void removeChestConfig(BlockPos chestPos) {
         chestConfigManager.removeChestConfig(world, chestPos, this);
         probeRegistry.invalidateCache();
+        RoutingIndexEpoch.bump();
         networkDirty = true;
         markDirty();
     }
@@ -592,6 +598,64 @@ public class StorageControllerBlockEntity extends BlockEntity
             }
             idx++;
         }
+
+        writeWhitelists(view, allConfigs);
+    }
+
+    /*
+     * Whitelists use their own "ssbulk_wl_*" keys. The names come from the
+     * Bulk Edit add-on this fork grew out of, so worlds that used the add-on
+     * keep their whitelists.
+     */
+    private static void writeWhitelists(WriteView view, Map<BlockPos, ChestConfig> configs) {
+        int index = 0;
+        for (Map.Entry<BlockPos, ChestConfig> entry : configs.entrySet()) {
+            ChestConfig config = entry.getValue();
+            Set<net.minecraft.item.Item> items = config.getWhitelist();
+            if (!config.whitelistEnabled && !config.whitelistEditMode && items.isEmpty()) {
+                continue;
+            }
+            String prefix = "ssbulk_wl_" + index;
+            view.putLong(prefix + "_pos", entry.getKey().asLong());
+            view.putBoolean(prefix + "_enabled", config.whitelistEnabled);
+            view.putBoolean(prefix + "_editMode", config.whitelistEditMode);
+            view.putInt(prefix + "_count", items.size());
+            int itemIndex = 0;
+            for (net.minecraft.item.Item item : items) {
+                view.putString(prefix + "_item_" + itemIndex, net.minecraft.registry.Registries.ITEM.getId(item).toString());
+                itemIndex++;
+            }
+            index++;
+        }
+        view.putInt("ssbulk_wl_chest_count", index);
+    }
+
+    private void readWhitelists(ReadView view) {
+        int chestCount = view.getInt("ssbulk_wl_chest_count", 0);
+        for (int index = 0; index < chestCount; index++) {
+            String prefix = "ssbulk_wl_" + index;
+            Optional<Long> posLong = view.getOptionalLong(prefix + "_pos");
+            if (posLong.isEmpty()) {
+                continue;
+            }
+            ChestConfig config = chestConfigManager.getChestConfig(BlockPos.fromLong(posLong.get()));
+            if (config == null) {
+                continue; // chest no longer linked
+            }
+            Set<net.minecraft.item.Item> items = new HashSet<>();
+            int itemCount = view.getInt(prefix + "_count", 0);
+            for (int itemIndex = 0; itemIndex < itemCount; itemIndex++) {
+                view.getOptionalString(prefix + "_item_" + itemIndex).ifPresent(idStr -> {
+                    net.minecraft.util.Identifier id = net.minecraft.util.Identifier.tryParse(idStr);
+                    if (id != null) {
+                        items.add(net.minecraft.registry.Registries.ITEM.get(id));
+                    }
+                });
+            }
+            config.whitelistEnabled = view.getBoolean(prefix + "_enabled", false);
+            config.whitelistEditMode = view.getBoolean(prefix + "_editMode", false);
+            config.setWhitelist(items);
+        }
     }
 
     @Override
@@ -665,6 +729,7 @@ public class StorageControllerBlockEntity extends BlockEntity
             chestList.add(chestNbt);
         }
         chestConfigManager.readFromNbt(chestList);
+        readWhitelists(view);
     }
     //?} else {
     /*@Override
@@ -768,6 +833,9 @@ public class StorageControllerBlockEntity extends BlockEntity
     // ========================================
 
     public void onRemoved() {
+        if (world instanceof ServerWorld serverWorld) {
+            ChunkKeeper.unregister(serverWorld, pos);
+        }
         if (world != null && !world.isClient()) {
             // Drop XP as experience orbs
             if (storedExperience > 0) {

@@ -15,17 +15,22 @@ import net.minecraft.world.World;
 
 import net.shaddii.smartsorter.block.IntakeBlock;
 import net.shaddii.smartsorter.blockentity.IntakeBlockEntity;
-import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
-import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
+import net.shaddii.smartsorter.config.SmartSorterConfig;
+import net.shaddii.smartsorter.intake.IntakeBuffer;
+import net.shaddii.smartsorter.intake.IntakeRouting;
 
 import java.util.Objects;
 
 /**
- * Handles all logic for moving and routing items between SmartSorter blocks.
+ * Moves items from the inventory an intake faces into the storage network.
  *
- * OPTIMIZED FLOW:
- * - Intake now uses a single transactional operation to pull from a source
- *   and push to the controller, avoiding inefficient "check-then-do" logic.
+ * An item with no free chest never blocks the intake:
+ *  - partial-insert remainders go into the intake's multi-slot IntakeBuffer,
+ *    each stack with its own retry time, and every due stack is retried on
+ *    each pass (a configured overflow chest gets them if set);
+ *  - an item that couldn't be routed gets a cooldown (stuckRetryTicks) and is
+ *    skipped with one map lookup until then, so the intake moves on to the
+ *    next item instead of retrying the stuck one every pass.
  */
 public final class StorageLogic {
 
@@ -34,187 +39,82 @@ public final class StorageLogic {
     /** Maximum number of items an intake can pull per operation. */
     private static final int MAX_PULL_PER_OP = 8;
 
-    // ---------------------------------------------------------------------------------
-    // UNIFIED PULL & ROUTE LOGIC
-    // This single method replaces both pullFromFacingIntoBuffer and routeBuffer.
-    // ---------------------------------------------------------------------------------
-
     /**
-     * Tries to pull an item from the inventory the intake is facing and route it
-     * into the connected storage network (either via controller or direct outputs).
-     * @param intake The intake block entity performing the operation.
-     * @return True if an item was successfully moved, false otherwise.
+     * One intake operation: retry due buffered stacks, then pull the next
+     * source item that isn't on cooldown (up to MAX_PULL_PER_OP, in a
+     * transaction committed only when something was inserted).
+     *
+     * @return true if anything moved (IntakeBlockEntity.tick keeps calling
+     *         while this returns true, then idles).
      */
     public static boolean pullAndRoute(IntakeBlockEntity intake) {
         if (intake == null || intake.getWorld() == null || intake.getWorld().isClient()) {
             return false;
         }
 
-        if (!intake.getBuffer().isEmpty()) {
-            return tryRouteBuffer(intake);
+        World world = intake.getWorld();
+        IntakeBuffer buffer = intake.getIntakeBuffer();
+        long now = world.getTime();
+
+        boolean moved = buffer.anyDue(now) && IntakeRouting.routeBuffered(world, intake, buffer, now);
+        return pullFromSource(world, intake, buffer, now) || moved;
+    }
+
+    private static boolean pullFromSource(World world, IntakeBlockEntity intake, IntakeBuffer buffer, long now) {
+        if (!intake.isInManagedMode() && !intake.isInDirectMode()) {
+            return false;
+        }
+        if (intake.isInManagedMode() && IntakeRouting.controllerOf(world, intake) == null) {
+            return false;
         }
 
-        World world = intake.getWorld();
         Direction facing = intake.getCachedState().get(IntakeBlock.FACING);
         BlockPos sourcePos = intake.getPos().offset(facing);
-
+        if (!world.isChunkLoaded(sourcePos)) {
+            return false;
+        }
         Storage<ItemVariant> fromStorage = locateItemStorage(world, sourcePos, facing.getOpposite());
         if (fromStorage == null) {
             return false;
         }
 
+        long retryAt = now + SmartSorterConfig.stuckRetryTicks;
         for (StorageView<ItemVariant> view : fromStorage) {
             if (view.isResourceBlank() || view.getAmount() == 0) continue;
 
             ItemVariant variant = view.getResource();
+            if (buffer.isCoolingDown(variant, now)) continue;
+
             int maxAmount = (int) Math.min(MAX_PULL_PER_OP, view.getAmount());
-
             try (Transaction tx = Transaction.openOuter()) {
-                // 1. Optimistically extract the item from the source inventory.
-                long extractedAmount = view.extract(variant, maxAmount, tx);
-                if (extractedAmount == 0) continue;
+                long extracted = view.extract(variant, maxAmount, tx);
+                if (extracted == 0) continue; // closing the transaction aborts it
 
-                ItemStack extractedStack = variant.toStack((int) extractedAmount);
-                ItemStack remainder;
+                ItemStack remainder = IntakeRouting.route(world, intake, variant.toStack((int) extracted));
+                long inserted = remainder == null ? 0 : extracted - remainder.getCount();
+                if (inserted <= 0) {
+                    // No destination right now: leave it in the source and skip it for a while.
+                    buffer.coolDown(variant, retryAt);
+                    continue;
+                }
 
-                // 2. Try to insert the extracted item into the network.
-                if (intake.isInManagedMode()) {
-                    // --- MANAGED MODE: Use Controller ---
-                    StorageControllerBlockEntity controller = getController(world, intake);
-                    if (controller != null) {
-                        remainder = controller.insertItem(extractedStack).remainder();
-                    } else {
-                        // Controller is missing, cannot insert.
-                        tx.abort(); // Abort reverts the extraction.
-                        continue;
+                if (!remainder.isEmpty()) {
+                    // The chests filled up mid-insert, so this item has no more room anywhere.
+                    buffer.coolDown(variant, retryAt);
+                    if (!buffer.hasSlotFor(remainder)) {
+                        // Buffer full: put the rest back into the source in the same transaction.
+                        long returned = fromStorage.insert(variant, remainder.getCount(), tx);
+                        remainder.decrement((int) returned);
                     }
-                } else if (intake.isInDirectMode()) {
-                    // --- DIRECT MODE: Use legacy direct output ---
-                    remainder = insertIntoDirectOutputs(world, intake, extractedStack);
-                } else {
-                    // Not connected to anything
-                    tx.abort();
-                    return false;
+                    buffer.add(remainder, retryAt); // never drops items
                 }
 
-                // 3. Analyze the result and commit/abort.
-                long insertedAmount = extractedAmount - remainder.getCount();
-
-                if (insertedAmount > 0) {
-                    intake.setBuffer(remainder);
-                    tx.commit(); // This makes the extraction and insertion permanent.
-                    return true;
-                } else {
-                    tx.abort();
-                }
+                tx.commit();
+                return true;
             }
         }
-
         return false;
     }
-
-    /**
-     * Helper method to try routing an item that's already in the intake's buffer.
-     * This is for items that failed to be fully inserted in a previous tick.
-     */
-    private static boolean tryRouteBuffer(IntakeBlockEntity intake) {
-        World world = intake.getWorld();
-        ItemStack bufferStack = intake.getBuffer();
-        if (world == null || bufferStack.isEmpty()) return false;
-
-        ItemStack remainder;
-        if (intake.isInManagedMode()) {
-            StorageControllerBlockEntity controller = getController(world, intake);
-            if (controller != null) {
-                remainder = controller.insertItem(bufferStack).remainder();
-            } else {
-                return false;
-            }
-        } else if (intake.isInDirectMode()) {
-            remainder = insertIntoDirectOutputs(world, intake, bufferStack);
-        } else {
-            return false;
-        }
-
-        if (remainder.getCount() < bufferStack.getCount()) {
-            intake.setBuffer(remainder);
-            return true;
-        }
-
-        return false;
-    }
-
-    // --- HELPER METHODS ---
-
-    private static StorageControllerBlockEntity getController(World world, IntakeBlockEntity intake) {
-        BlockPos controllerPos = intake.getController();
-        if (controllerPos == null) return null;
-
-        BlockEntity be = world.getBlockEntity(controllerPos);
-        return be instanceof StorageControllerBlockEntity controller ? controller : null;
-    }
-
-    private static ItemStack insertIntoDirectOutputs(World world, IntakeBlockEntity intake, ItemStack stackToInsert) {
-        ItemVariant variant = ItemVariant.of(stackToInsert);
-        ItemStack currentStack = stackToInsert.copy();
-
-        for (BlockPos probePos : intake.getOutputs()) {
-            if (currentStack.isEmpty()) break;
-
-            BlockEntity target = world.getBlockEntity(probePos);
-            if (!(target instanceof OutputProbeBlockEntity probe) || !probe.accepts(variant)) continue;
-
-            int inserted = insertIntoInventoryFacingProbe(world, probe, variant, currentStack.getCount());
-            if (inserted > 0) {
-                currentStack.decrement(inserted);
-            }
-        }
-        return currentStack;
-    }
-
-    private static int insertIntoInventoryFacingProbe(World world, OutputProbeBlockEntity probe,
-                                                      ItemVariant variant, int amount) {
-        Inventory inventory = probe.getTargetInventory();
-        if (inventory == null) return 0;
-
-        ItemStack toInsert = variant.toStack(amount);
-        int originalCount = toInsert.getCount();
-        int maxStackSize = Math.min(toInsert.getMaxCount(), inventory.getMaxCountPerStack());
-
-        boolean inventoryChanged = false;
-
-        // OPTIMIZED: Single pass - check existing stacks AND empty slots
-        for (int i = 0; i < inventory.size() && !toInsert.isEmpty(); i++) {
-            ItemStack slot = inventory.getStack(i);
-
-            if (slot.isEmpty()) {
-                // Empty slot - insert directly
-                int insertCount = Math.min(maxStackSize, toInsert.getCount());
-                inventory.setStack(i, toInsert.copyWithCount(insertCount));
-                toInsert.decrement(insertCount);
-                inventoryChanged = true;
-
-            } else if (ItemStack.areItemsAndComponentsEqual(slot, toInsert)) {
-                // Matching stack - try to merge
-                int canAdd = maxStackSize - slot.getCount();
-                if (canAdd > 0) {
-                    int add = Math.min(canAdd, toInsert.getCount());
-                    slot.increment(add);
-                    toInsert.decrement(add);
-                    inventoryChanged = true;
-                }
-            }
-        }
-
-        // BATCHED markDirty() - only once per insertion operation
-        if (inventoryChanged) {
-            inventory.markDirty();
-            probe.invalidateConfigCache(); // Invalidate cache when inventory changes
-        }
-
-        return originalCount - toInsert.getCount();
-    }
-
 
     private static Storage<ItemVariant> locateItemStorage(World world, BlockPos pos, Direction searchSide) {
         Objects.requireNonNull(world);

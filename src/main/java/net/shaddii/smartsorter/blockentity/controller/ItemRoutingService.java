@@ -3,6 +3,7 @@ package net.shaddii.smartsorter.blockentity.controller;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.inventory.Inventory;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
@@ -10,6 +11,8 @@ import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 import net.shaddii.smartsorter.util.Category;
 import net.shaddii.smartsorter.util.CategoryManager;
 import net.shaddii.smartsorter.util.ChestConfig;
+import net.shaddii.smartsorter.util.RouteCandidates;
+import net.shaddii.smartsorter.util.RoutingIndexEpoch;
 
 import java.util.*;
 
@@ -25,40 +28,45 @@ public class ItemRoutingService {
             new InsertionResult(ItemStack.EMPTY, false, null, null, 0);
 
     private final ProbeRegistry probeRegistry;
-    private final Map<BlockPos, OutputProbeBlockEntity> probeCache = new HashMap<>();
+    // Per-item routing index (see getCandidates)
+    private final Map<Item, RouteCandidates> routeIndex = new HashMap<>();
+    private List<BlockPos> indexSource;
+    private long indexEpoch;
 
     public ItemRoutingService(ProbeRegistry probeRegistry) {
         this.probeRegistry = probeRegistry;
     }
 
     /**
-     * OPTIMIZED: Smart filtering to avoid checking all 1671 probes
+     * Routes {@code stack} into the network: pass 1 tries every filtered
+     * destination, pass 2 general and overflow storage, both in the
+     * controller's priority order, continuing until the stack is fully
+     * inserted (a nearly-full chest takes part and the rest moves on).
+     *
+     * Instead of calling accepts() on every linked probe, each pass walks a
+     * per-Item list of candidate probes (see getCandidates).
      */
     public InsertionResult insertItem(World world, ItemStack stack) {
         if (world == null || stack.isEmpty()) {
             return new InsertionResult(stack, false, null, null, 0);
         }
 
-        probeCache.clear();
-
         ItemVariant variant = ItemVariant.of(stack);
         ItemStack remaining = stack.copy();
 
         BlockPos insertedInto = null;
         String insertedIntoName = null;
-        boolean potentialOverflow = false;
 
         // PRE-FILTER: Categorize item once
         Category itemCategory = CategoryManager.getInstance().categorize(stack.getItem());
 
         List<BlockPos> sortedProbes = probeRegistry.getSortedProbes(world);
+        RouteCandidates candidates = getCandidates(world, sortedProbes, stack.getItem(), itemCategory);
+        int count = candidates.positions.length;
 
         // Phase 1: High-priority & filtered destinations
-        // OPTIMIZATION: Use early exit on full insertion
-        for (BlockPos probePos : sortedProbes) {
-            if (remaining.isEmpty()) break;
-
-            OutputProbeBlockEntity probe = getCachedProbe(world, probePos);
+        for (int i = 0; i < count && !remaining.isEmpty(); i++) {
+            OutputProbeBlockEntity probe = resolve(world, candidates, i);
             if (probe == null) continue;
 
             ChestConfig config = probe.getChestConfig();
@@ -70,12 +78,7 @@ public class ItemRoutingService {
                 continue;
             }
 
-            // OPTIMIZATION: Quick category filter BEFORE accepts() check
-            if (!quickCategoryCheck(config, itemCategory)) {
-                continue;
-            }
-
-            if (probe.accepts(variant)) {
+            if (quickCategoryCheck(config, itemCategory) && probe.accepts(variant)) {
                 int inserted = insertIntoInventorySinglePass(probe, remaining);
 
                 if (inserted > 0 && insertedInto == null) {
@@ -91,15 +94,11 @@ public class ItemRoutingService {
             return new InsertionResult(ItemStack.EMPTY, false, insertedInto, insertedIntoName, stack.getCount());
         }
 
-        potentialOverflow = true;
-
         // Phase 2: General & overflow destinations
         boolean didOverflow = false;
 
-        for (BlockPos probePos : sortedProbes) {
-            if (remaining.isEmpty()) break;
-
-            OutputProbeBlockEntity probe = getCachedProbe(world, probePos);
+        for (int i = 0; i < count && !remaining.isEmpty(); i++) {
+            OutputProbeBlockEntity probe = resolve(world, candidates, i);
             if (probe == null) continue;
 
             ChestConfig config = probe.getChestConfig();
@@ -120,7 +119,7 @@ public class ItemRoutingService {
                         insertedIntoName = getChestDisplayName(config);
                     }
 
-                    if (potentialOverflow && config.filterMode == ChestConfig.FilterMode.OVERFLOW) {
+                    if (config.filterMode == ChestConfig.FilterMode.OVERFLOW) {
                         didOverflow = true;
                     }
                 }
@@ -135,6 +134,81 @@ public class ItemRoutingService {
 
         int totalInserted = stack.getCount() - remaining.getCount();
         return new InsertionResult(remaining, didOverflow, insertedInto, insertedIntoName, totalInserted);
+    }
+
+    /**
+     * The probes that could possibly take {@code item}, in priority order.
+     *
+     * Only the config-dependent part of the decision goes in: a probe is left
+     * out if it has no block entity, no config, or a category-filtered mode
+     * that rejects the item's category - i.e. it would fail both passes no
+     * matter what the chest holds. Space, contents and whitelists are still
+     * checked live by accepts(), and insertItem() re-checks the config, so
+     * the index can only skip probes, never route into a wrong one.
+     *
+     * Keyed by Item (the only input is the item's category, which components
+     * can't change). The whole index is dropped when:
+     *  - ProbeRegistry hands back a different sorted list (probe added/removed,
+     *    config edited via the controller, epoch change, or its 100-tick refresh);
+     *  - RoutingIndexEpoch moved (a probe loaded, its config or mode changed,
+     *    a whitelist was edited, a probe was removed);
+     *  - a cached probe block entity was removed (see resolve()).
+     * Probes in unloaded chunks are never looked up (that would force-load
+     * the chunk); their chunk loading bumps the epoch.
+     */
+    private RouteCandidates getCandidates(World world, List<BlockPos> sortedProbes, Item item, Category itemCategory) {
+        long epoch = RoutingIndexEpoch.get();
+        if (indexSource != sortedProbes || indexEpoch != epoch) {
+            routeIndex.clear();
+            indexSource = sortedProbes;
+            indexEpoch = epoch;
+        }
+
+        RouteCandidates cached = routeIndex.get(item);
+        if (cached != null) {
+            return cached;
+        }
+
+        List<BlockPos> positions = new ArrayList<>(sortedProbes.size());
+        List<OutputProbeBlockEntity> probes = new ArrayList<>(sortedProbes.size());
+        for (BlockPos probePos : sortedProbes) {
+            if (!world.isChunkLoaded(probePos)) continue;
+            if (!(world.getBlockEntity(probePos) instanceof OutputProbeBlockEntity probe)) continue;
+
+            ChestConfig config = probe.getChestConfig();
+            if (config == null) continue;
+
+            boolean secondPass = config.filterMode == ChestConfig.FilterMode.NONE
+                    || config.filterMode == ChestConfig.FilterMode.OVERFLOW;
+            if (!secondPass && !quickCategoryCheck(config, itemCategory)) {
+                continue; // rejected by pass 1 and not eligible for pass 2
+            }
+            positions.add(probePos);
+            probes.add(probe);
+        }
+
+        RouteCandidates built = new RouteCandidates(
+                positions.toArray(new BlockPos[0]), probes.toArray(new OutputProbeBlockEntity[0]));
+        routeIndex.put(item, built);
+        return built;
+    }
+
+    /**
+     * The block entity recorded for candidate i, or - if it has since been
+     * removed (broken, chunk unloaded) - whatever is there now, unless that
+     * chunk is unloaded. Either way the index is marked stale.
+     */
+    private OutputProbeBlockEntity resolve(World world, RouteCandidates candidates, int i) {
+        OutputProbeBlockEntity probe = candidates.probes[i];
+        if (!probe.isRemoved()) {
+            return probe;
+        }
+        indexSource = null;
+        BlockPos pos = candidates.positions[i];
+        if (!world.isChunkLoaded(pos)) {
+            return null;
+        }
+        return world.getBlockEntity(pos) instanceof OutputProbeBlockEntity fresh ? fresh : null;
     }
 
     /**
@@ -266,16 +340,6 @@ public class ItemRoutingService {
         }
 
         return extracted;
-    }
-
-    /**
-     * CACHED probe lookup
-     */
-    private OutputProbeBlockEntity getCachedProbe(World world, BlockPos pos) {
-        return probeCache.computeIfAbsent(pos, p -> {
-            BlockEntity be = world.getBlockEntity(p);
-            return be instanceof OutputProbeBlockEntity probe ? probe : null;
-        });
     }
 
     private String getChestDisplayName(ChestConfig config) {

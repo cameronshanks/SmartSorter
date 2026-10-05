@@ -9,6 +9,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.StorageLogic;
+import net.shaddii.smartsorter.intake.IntakeBuffer;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -34,7 +35,7 @@ public class IntakeBlockEntity extends BlockEntity {
     private BlockPos controllerPos = null;
 
     // State
-    private ItemStack buffer = ItemStack.EMPTY;
+    private final IntakeBuffer intakeBuffer = new IntakeBuffer();
     private int cooldown = 0;
 
     // Performance tracking
@@ -93,8 +94,10 @@ public class IntakeBlockEntity extends BlockEntity {
     }
 
     private void validateLinks(World world) {
+        // Links in unloaded chunks are kept: looking them up would force-load the chunk.
+
         // Validate controller
-        if (controllerPos != null) {
+        if (controllerPos != null && world.isChunkLoaded(controllerPos)) {
             BlockEntity be = world.getBlockEntity(controllerPos);
             if (!(be instanceof net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity)) {
                 controllerPos = null;
@@ -104,6 +107,7 @@ public class IntakeBlockEntity extends BlockEntity {
 
         // Validate output probes
         outputs.removeIf(outputPos -> {
+            if (!world.isChunkLoaded(outputPos)) return false;
             BlockEntity be = world.getBlockEntity(outputPos);
             return !(be instanceof net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity);
         });
@@ -181,12 +185,9 @@ public class IntakeBlockEntity extends BlockEntity {
     // BUFFER MANAGEMENT
     // ========================================
 
-    public ItemStack getBuffer() {
-        return buffer;
-    }
-
-    public void setBuffer(ItemStack stack) {
-        this.buffer = stack;
+    /** Stacks waiting for a destination (see StorageLogic / IntakeBuffer). */
+    public IntakeBuffer getIntakeBuffer() {
+        return intakeBuffer;
     }
 
     // ========================================
@@ -209,10 +210,16 @@ public class IntakeBlockEntity extends BlockEntity {
             view.putLong("o" + i, outputs.get(i).asLong());
         }
 
-        // Buffer
-        if (!buffer.isEmpty()) {
-            view.put("buffer", ItemStack.OPTIONAL_CODEC, buffer);
+        // Buffer ("ssbulk_buf_*" keys, as written by the Bulk Edit add-on
+        // this fork grew out of, so its worlds load unchanged)
+        int count = 0;
+        for (IntakeBuffer.Entry entry : intakeBuffer.entries()) {
+            if (!entry.stack.isEmpty()) {
+                view.put("ssbulk_buf_" + count, ItemStack.CODEC, entry.stack);
+                count++;
+            }
         }
+        view.putInt("ssbulk_buf_count", count);
     }
 
     @Override
@@ -230,8 +237,14 @@ public class IntakeBlockEntity extends BlockEntity {
             view.getOptionalLong("o" + i).ifPresent(pos -> outputs.add(BlockPos.fromLong(pos)));
         }
 
-        // Buffer
-        buffer = view.read("buffer", ItemStack.OPTIONAL_CODEC).orElse(ItemStack.EMPTY);
+        // Buffer. Everything loaded is retried on the first pass (retry time 0).
+        intakeBuffer.drain();
+        // Original Smart Sorter's single buffer stack
+        view.read("buffer", ItemStack.OPTIONAL_CODEC).ifPresent(stack -> intakeBuffer.add(stack, 0L));
+        int count = view.getInt("ssbulk_buf_count", 0);
+        for (int i = 0; i < count; i++) {
+            view.read("ssbulk_buf_" + i, ItemStack.CODEC).ifPresent(stack -> intakeBuffer.add(stack, 0L));
+        }
     }
     //?} else {
     

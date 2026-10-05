@@ -1,11 +1,11 @@
 package net.shaddii.smartsorter.blockentity.controller;
 
 import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.inventory.Inventory;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 import net.shaddii.smartsorter.util.ChestConfig;
+import net.shaddii.smartsorter.util.RoutingIndexEpoch;
 
 import java.util.*;
 
@@ -30,6 +30,7 @@ public class ProbeRegistry {
     private boolean sortCacheDirty = true;
     private long lastCacheUpdate = 0;
     private static final long CACHE_LIFETIME = 100; // 5 seconds
+    private long seenEpoch = Long.MIN_VALUE;
 
     public boolean addProbe(BlockPos probePos) {
         if (linkedProbes.contains(probePos)) {
@@ -56,6 +57,14 @@ public class ProbeRegistry {
      */
     public List<BlockPos> getSortedProbes(World world) {
         long currentTime = world != null ? world.getTime() : 0;
+
+        // A probe loaded with its chunk, or a probe config changed outside
+        // the controller: re-sort now instead of at the next 100-tick refresh.
+        long epoch = RoutingIndexEpoch.get();
+        if (epoch != seenEpoch) {
+            seenEpoch = epoch;
+            sortCacheDirty = true;
+        }
 
         // Return cached if still valid
         if (!sortCacheDirty && sortedProbesCache != null &&
@@ -150,6 +159,12 @@ public class ProbeRegistry {
             probeCache.remove(pos);
         }
 
+        // Never look up a probe in an unloaded chunk (forces a synchronous
+        // load); it's just left out of this pass.
+        if (world == null || !world.isChunkLoaded(pos)) {
+            return null;
+        }
+
         // Lookup and cache
         BlockEntity be = world.getBlockEntity(pos);
         if (be instanceof OutputProbeBlockEntity probe) {
@@ -178,21 +193,9 @@ public class ProbeRegistry {
         return hasItems;
     }
 
-    /**
-     * OPTIMIZED: Early exit on first item found
-     */
+    /** Answered from the probe's chest-contents snapshot, no slot scan. */
     private boolean checkHasItemsFast(OutputProbeBlockEntity probe) {
-        Inventory inv = probe.getTargetInventory();
-        if (inv == null) return false;
-
-        // Early exit on first non-empty slot
-        int size = inv.size();
-        for (int i = 0; i < size; i++) {
-            if (!inv.getStack(i).isEmpty()) {
-                return true;
-            }
-        }
-        return false;
+        return probe.targetHasItems();
     }
 
     public List<BlockPos> getLinkedProbes() {
@@ -214,6 +217,11 @@ public class ProbeRegistry {
      */
     public void validate(World world) {
         linkedProbes.removeIf(probePos -> {
+            // Probes in unloaded chunks stay linked instead of being
+            // force-loaded to check (or dropped as missing).
+            if (world == null || !world.isChunkLoaded(probePos)) {
+                return false;
+            }
             OutputProbeBlockEntity probe = getCachedProbe(world, probePos);
             if (probe == null || probe.isRemoved()) {
                 probeCache.remove(probePos);

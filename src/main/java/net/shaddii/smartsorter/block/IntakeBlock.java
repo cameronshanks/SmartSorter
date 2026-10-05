@@ -26,8 +26,12 @@ import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.blockentity.IntakeBlockEntity;
 import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
+import net.shaddii.smartsorter.chunk.ChunkKeeper;
+import net.shaddii.smartsorter.intake.IntakeBuffer;
 import net.shaddii.smartsorter.item.LinkingToolItem;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.List;
 
 public class IntakeBlock extends BlockWithEntity {
     // ========================================
@@ -102,17 +106,45 @@ public class IntakeBlock extends BlockWithEntity {
         if (player.isSneaking() && !heldStack.isEmpty()) return ActionResult.PASS;
         if (!heldStack.isEmpty() && heldStack.getItem() instanceof LinkingToolItem) return ActionResult.PASS;
 
+        IntakeBuffer buffer = intake.getIntakeBuffer();
+
+        // Sneak + empty hand with something buffered: hand it all back to the player.
+        if (player.isSneaking() && heldStack.isEmpty() && !buffer.isEmpty()) {
+            int total = buffer.totalCount();
+            List<ItemStack> stacks = buffer.drain();
+            for (ItemStack stack : stacks) {
+                player.getInventory().offerOrDrop(stack);
+            }
+            intake.markDirty();
+            player.sendMessage(Text.literal("§7Intake: §aCleared buffer §7(" + stacks.size() + " stacks, " + total + " items returned)"), true);
+            return ActionResult.SUCCESS;
+        }
+
+        player.sendMessage(Text.literal(statusText(state, world, intake, buffer)), true);
+        return ActionResult.SUCCESS;
+    }
+
+    /** Action-bar status: facing, buffer contents, link mode, and any stuck items. */
+    private static String statusText(BlockState state, World world, IntakeBlockEntity intake, IntakeBuffer buffer) {
         String facing = state.get(FACING).asString();
-        String bufferText = intake.getBuffer().isEmpty()
-                ? "§8Empty"
-                : "§e" + intake.getBuffer().getCount() + "x §f" + intake.getBuffer().getItem().getName(intake.getBuffer()).getString();
+
+        String bufferText;
+        List<IntakeBuffer.Entry> entries = buffer.entries();
+        if (entries.isEmpty()) {
+            bufferText = "§8Empty";
+        } else if (entries.size() == 1) {
+            ItemStack stack = entries.get(0).stack;
+            bufferText = "§e" + stack.getCount() + "x §f" + stack.getName().getString();
+        } else {
+            bufferText = "§e" + entries.size() + " stacks §7(" + buffer.totalCount() + " items)";
+        }
 
         // Build mode status text
         String modeText;
         if (intake.isInManagedMode()) {
             BlockPos controllerPos = intake.getController();
-            BlockEntity controllerBE = world.getBlockEntity(controllerPos);
-            if (controllerBE instanceof StorageControllerBlockEntity controller) {
+            if (world.isChunkLoaded(controllerPos)
+                    && world.getBlockEntity(controllerPos) instanceof StorageControllerBlockEntity controller) {
                 int probeCount = controller.getLinkedProbes().size();
                 if (probeCount == 0) {
                     modeText = "§e⚠ Managed Mode (No Probes)";
@@ -129,11 +161,26 @@ public class IntakeBlock extends BlockWithEntity {
             modeText = "§cNot Linked";
         }
 
-        player.sendMessage(Text.literal(
-                "§7Intake §8[§b" + facing + "§8] §7| Buffer: " + bufferText + " §7| " + modeText
-        ), true);
+        String text = "§7Intake §8[§b" + facing + "§8] §7| Buffer: " + bufferText + " §7| " + modeText;
 
-        return ActionResult.SUCCESS;
+        int stuckTypes = buffer.stuckTypes();
+        if (stuckTypes > 0) {
+            StringBuilder names = new StringBuilder();
+            int shown = 0;
+            for (IntakeBuffer.Entry entry : entries) {
+                if (!entry.stuck) continue;
+                if (shown == 3) {
+                    names.append(", ...");
+                    break;
+                }
+                if (shown > 0) names.append(", ");
+                names.append(entry.stack.getName().getString());
+                shown++;
+            }
+            text += " §7| §c⚠ Stuck: " + stuckTypes + " type" + (stuckTypes == 1 ? "" : "s")
+                    + " (" + buffer.stuckCount() + " items): " + names + " §8(sneak + empty hand to clear)";
+        }
+        return text;
     }
 
     // ========================================
@@ -156,9 +203,12 @@ public class IntakeBlock extends BlockWithEntity {
             BlockEntity blockEntity = world.getBlockEntity(pos);
 
             // Scatter buffered items
-            if (blockEntity instanceof IntakeBlockEntity intake && !intake.getBuffer().isEmpty()) {
-                ItemScatterer.spawn(world, pos.getX(), pos.getY(), pos.getZ(), intake.getBuffer());
+            if (blockEntity instanceof IntakeBlockEntity intake) {
+                for (ItemStack stack : intake.getIntakeBuffer().drain()) {
+                    ItemScatterer.spawn(world, pos.getX(), pos.getY(), pos.getZ(), stack);
+                }
             }
+            ChunkKeeper.unregister(world, pos);
 
             // Unlink from controller
             if (blockEntity instanceof IntakeBlockEntity intake) {
