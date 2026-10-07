@@ -1,14 +1,12 @@
 package net.shaddii.smartsorter.util;
 
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtElement;
-import net.minecraft.nbt.NbtList;
-import net.minecraft.nbt.NbtString;
-import net.minecraft.util.math.BlockPos;
-
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.StringTag;
 
 public class ProcessProbeConfig {
     public BlockPos position;
@@ -126,8 +124,8 @@ public class ProcessProbeConfig {
         this.itemsProcessed = 0;
     }
 
-    public NbtCompound toNbt() {
-        NbtCompound nbt = new NbtCompound();
+    public CompoundTag toNbt() {
+        CompoundTag nbt = new CompoundTag();
 
         nbt.putLong("pos", position.asLong());
         if (customName != null) {
@@ -141,47 +139,46 @@ public class ProcessProbeConfig {
         nbt.putInt("index", index);
 
         // Custom recipe whitelist
-        NbtList recipeList = new NbtList();
+        ListTag recipeList = new ListTag();
         for (String itemId : customRecipeWhitelist) {
-            recipeList.add(NbtString.of(itemId));
+            recipeList.add(StringTag.valueOf(itemId));
         }
         nbt.put("customRecipes", recipeList);
 
         // Custom fuel whitelist
-        NbtList fuelList = new NbtList();
+        ListTag fuelList = new ListTag();
         for (String itemId : customFuelWhitelist) {
-            fuelList.add(NbtString.of(itemId));
+            fuelList.add(StringTag.valueOf(itemId));
         }
         nbt.put("customFuels", fuelList);
 
         return nbt;
     }
 
-    public static ProcessProbeConfig fromNbt(NbtCompound nbt) {
+    public static ProcessProbeConfig fromNbt(CompoundTag nbt) {
         ProcessProbeConfig config = new ProcessProbeConfig();
 
-        //? if >=1.21.8 {
         
         // Read position
-        long posLong = nbt.getLong("pos", 0L);
-        config.position = BlockPos.fromLong(posLong);
+        long posLong = nbt.getLongOr("pos", 0L);
+        config.position = BlockPos.of(posLong);
 
         // Read strings with defaults
         if (nbt.contains("customName")) {
-            config.customName = nbt.getString("customName", null);
+            config.customName = nbt.getStringOr("customName", null);
         }
 
-        config.machineType = nbt.getString("machineType", "Unknown");
-        config.enabled = nbt.getBoolean("enabled", true);
+        config.machineType = nbt.getStringOr("machineType", "Unknown");
+        config.enabled = nbt.getBooleanOr("enabled", true);
 
-        String recipeStr = nbt.getString("recipeFilter", "ORES_ONLY");
+        String recipeStr = nbt.getStringOr("recipeFilter", "ORES_ONLY");
         config.recipeFilter = RecipeFilterMode.fromString(recipeStr);
 
-        String fuelStr = nbt.getString("fuelFilter", "COAL_ONLY");
+        String fuelStr = nbt.getStringOr("fuelFilter", "COAL_ONLY");
         config.fuelFilter = FuelFilterMode.fromString(fuelStr);
 
-        config.itemsProcessed = nbt.getInt("itemsProcessed", 0);
-        config.index = nbt.getInt("index", 0);
+        config.itemsProcessed = nbt.getIntOr("itemsProcessed", 0);
+        config.index = nbt.getIntOr("index", 0);
 
         // Read custom recipe whitelist
         if (nbt.contains("customRecipes")) {
@@ -208,40 +205,6 @@ public class ProcessProbeConfig {
                 }
             });
         }
-        //?} else {
-        /*// Read position
-        if (nbt.contains("pos")) {
-            config.position = BlockPos.fromLong(nbt.getLong("pos"));
-        }
-
-// Read strings with defaults
-        if (nbt.contains("customName")) {
-            config.customName = nbt.getString("customName");
-        }
-
-        config.machineType = nbt.contains("machineType") ? nbt.getString("machineType") : "Unknown";
-        config.enabled = nbt.contains("enabled") ? nbt.getBoolean("enabled") : true;
-
-        String recipeStr = nbt.contains("recipeFilter") ? nbt.getString("recipeFilter") : "ORES_ONLY";
-        config.recipeFilter = RecipeFilterMode.fromString(recipeStr);
-
-        String fuelStr = nbt.contains("fuelFilter") ? nbt.getString("fuelFilter") : "COAL_ONLY";
-        config.fuelFilter = FuelFilterMode.fromString(fuelStr);
-
-        config.itemsProcessed = nbt.getInt("itemsProcessed");
-        config.index = nbt.getInt("index");
-
-// Read custom recipe whitelist
-        if (nbt.contains("customRecipes")) {
-            NbtList recipeList = nbt.getList("customRecipes", NbtElement.STRING_TYPE);
-            for (int i = 0; i < recipeList.size(); i++) {
-                String itemId = recipeList.getString(i);
-                if (!itemId.isEmpty()) {
-                    config.customRecipeWhitelist.add(itemId);
-                }
-            }
-        }
-        *///?}
 
         return config;
     }

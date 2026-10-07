@@ -11,6 +11,8 @@ pluginManagement {
 
 plugins {
     id "dev.kikugie.stonecutter" version "0.7.10"
+    // Lets Gradle download the Java 25 JDK that Minecraft 26.1 needs
+    id "org.gradle.toolchains.foojay-resolver-convention" version "1.0.0"
 }
 
 stonecutter {
@@ -18,8 +20,8 @@ stonecutter {
     centralScript = "build.gradle"
 
     create(rootProject) {
-        versions "1.21.11"
-        vcsVersion = "1.21.11"
+        versions "26.1.2"
+        vcsVersion = "26.1.2"
     }
 }
 

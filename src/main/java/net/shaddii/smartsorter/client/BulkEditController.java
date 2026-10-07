@@ -8,10 +8,10 @@ import java.util.List;
 
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.text.Text;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.Component;
 import net.shaddii.smartsorter.network.ChestConfigUpdatePayload;
 import net.shaddii.smartsorter.screen.StorageControllerScreen;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
@@ -43,9 +43,9 @@ public final class BulkEditController {
     // Default target: Custom.
     private static int toIndex = Arrays.asList(MODES).indexOf(FilterMode.CUSTOM);
 
-    private static ButtonWidget fromButton;
-    private static ButtonWidget toButton;
-    private static ButtonWidget applyButton;
+    private static Button fromButton;
+    private static Button toButton;
+    private static Button applyButton;
 
     private static long armedUntil = 0L;
 
@@ -64,8 +64,8 @@ public final class BulkEditController {
     // Tick
     // ------------------------------------------------------------------
 
-    private static void onTick(MinecraftClient client) {
-        Screen current = client.currentScreen;
+    private static void onTick(Minecraft client) {
+        Screen current = client.screen;
 
         if (!(current instanceof StorageControllerScreen screen)) {
             fromButton = null;
@@ -107,18 +107,18 @@ public final class BulkEditController {
         int x = Math.max(2, guiX - w - 2);
         int y = guiY + 92;
 
-        fromButton = ButtonWidget.builder(Text.literal("From"), b -> {
+        fromButton = Button.builder(Component.literal("From"), b -> {
             fromIndex = (fromIndex + 1) % (MODES.length + 1);
             armedUntil = 0L;
-        }).dimensions(x, y, w, 16).build();
+        }).bounds(x, y, w, 16).build();
 
-        toButton = ButtonWidget.builder(Text.literal("To"), b -> {
+        toButton = Button.builder(Component.literal("To"), b -> {
             toIndex = (toIndex + 1) % MODES.length;
             armedUntil = 0L;
-        }).dimensions(x, y + 18, w, 16).build();
+        }).bounds(x, y + 18, w, 16).build();
 
-        applyButton = ButtonWidget.builder(Text.literal("Apply"), b -> onApply(screen))
-                .dimensions(x, y + 36, w, 16).build();
+        applyButton = Button.builder(Component.literal("Apply"), b -> onApply(screen))
+                .bounds(x, y + 36, w, 16).build();
 
         screen.addWidget(fromButton);
         screen.addWidget(toButton);
@@ -133,18 +133,18 @@ public final class BulkEditController {
         long now = System.currentTimeMillis();
 
         String fromName = fromIndex == 0 ? "Any mode" : MODES[fromIndex - 1].getDisplayName();
-        fromButton.setMessage(Text.literal("From: " + fromName));
-        toButton.setMessage(Text.literal("To: " + MODES[toIndex].getDisplayName()));
+        fromButton.setMessage(Component.literal("From: " + fromName));
+        toButton.setMessage(Component.literal("To: " + MODES[toIndex].getDisplayName()));
 
         if (!queue.isEmpty()) {
             applyButton.active = false;
-            applyButton.setMessage(Text.literal("Applying... " + queue.size() + " left"));
+            applyButton.setMessage(Component.literal("Applying... " + queue.size() + " left"));
         } else if (armedUntil > now) {
             applyButton.active = true;
-            applyButton.setMessage(Text.literal("Click again to confirm (" + matches + ")"));
+            applyButton.setMessage(Component.literal("Click again to confirm (" + matches + ")"));
         } else {
             applyButton.active = matches > 0;
-            applyButton.setMessage(Text.literal("Apply to " + matches + " chest" + (matches == 1 ? "" : "s")));
+            applyButton.setMessage(Component.literal("Apply to " + matches + " chest" + (matches == 1 ? "" : "s")));
         }
     }
 
@@ -156,7 +156,7 @@ public final class BulkEditController {
     private static List<ChestConfig> matching(StorageControllerScreen screen) {
         List<ChestConfig> out = new ArrayList<>();
         FilterMode target = MODES[toIndex];
-        for (ChestConfig c : screen.getScreenHandler().getChestConfigs().values()) {
+        for (ChestConfig c : screen.getMenu().getChestConfigs().values()) {
             if (c.filterMode == target) {
                 continue;
             }
@@ -177,7 +177,7 @@ public final class BulkEditController {
         armedUntil = 0L;
 
         FilterMode target = MODES[toIndex];
-        int regularChests = (int) screen.getScreenHandler().getChestConfigs().values().stream()
+        int regularChests = (int) screen.getMenu().getChestConfigs().values().stream()
                 .filter(c -> c.filterMode != FilterMode.CUSTOM).count();
 
         for (ChestConfig old : matching(screen)) {
@@ -198,11 +198,11 @@ public final class BulkEditController {
         totalSent = 0;
     }
 
-    private static void processQueue(MinecraftClient client, StorageControllerScreen screen) {
+    private static void processQueue(Minecraft client, StorageControllerScreen screen) {
         if (queue.isEmpty()) {
             return;
         }
-        StorageControllerScreenHandler handler = screen.getScreenHandler();
+        StorageControllerScreenHandler handler = screen.getMenu();
 
         for (int i = 0; i < PER_TICK && !queue.isEmpty(); i++) {
             ChestConfig cfg = queue.poll();
@@ -225,9 +225,9 @@ public final class BulkEditController {
         return screen.getCurrentTab() == StorageControllerScreen.Tab.CHESTS;
     }
 
-    private static void message(MinecraftClient client, String text) {
+    private static void message(Minecraft client, String text) {
         if (client.player != null) {
-            client.player.sendMessage(Text.literal("[Smart Sorter] " + text), false);
+            client.player.sendSystemMessage(Component.literal("[Smart Sorter] " + text));
         }
     }
 }

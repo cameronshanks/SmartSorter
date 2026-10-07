@@ -1,64 +1,39 @@
 package net.shaddii.smartsorter.widget;
 
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
-//? if >=1.21.11 {
-import net.minecraft.client.gui.widget.ClickableWidget;
-//?} else {
-/*import net.minecraft.client.gui.widget.ButtonWidget;
- *///?}
-import net.minecraft.client.gui.screen.narration.NarrationMessageBuilder;
-//? if <=1.21.1 {
-/*import net.minecraft.client.util.math.MatrixStack;
-*///?}
-import net.minecraft.text.Text;
-//? if >=1.21.9
-import net.minecraft.client.gui.Click;
 import org.joml.Matrix3x2f;
 
 import java.util.function.Consumer;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.client.gui.narration.NarrationElementOutput;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.network.chat.Component;
 
-//? if >=1.21.11 {
-public class CheckboxWidget extends ClickableWidget {
-//?} else {
-/*public class CheckboxWidget extends ButtonWidget {
-*///?}
+public class CheckboxWidget extends AbstractWidget {
     private boolean checked;
     private final Consumer<Boolean> onToggle;
-    private final TextRenderer textRenderer;
+    private final Font textRenderer;
 
-    public CheckboxWidget(int x, int y, int width, int height, Text message,
-                          TextRenderer textRenderer, boolean initialState,
+    public CheckboxWidget(int x, int y, int width, int height, Component message,
+                          Font textRenderer, boolean initialState,
                           Consumer<Boolean> onToggle) {
-        //? if >=1.21.11 {
         super(x, y, width, height, message);
-        //?} else {
-        /*super(x, y, width, height, message, button -> {}, DEFAULT_NARRATION_SUPPLIER);
-        *///?}
         this.textRenderer = textRenderer;
         this.checked = initialState;
         this.onToggle = onToggle;
     }
 
-    //? if >=1.21.9 {
     @Override
-    public void onClick(Click click, boolean doubled) {
+    public void onClick(MouseButtonEvent click, boolean doubled) {
         checked = !checked;
         if (onToggle != null) {
             onToggle.accept(checked);
         }
     }
-    //?} else {
-    /*public void onClick(double mouseX, double mouseY) {
-        checked = !checked;
-        if (onToggle != null) {
-            onToggle.accept(checked);
-        }
-    }
-    *///?}
 
     @Override
-    protected void renderWidget(DrawContext context, int mouseX, int mouseY, float delta) {
+    protected void extractWidgetRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
         // Draw checkbox box (SMALLER)
         int boxSize = 9;
         int boxX = getX();
@@ -79,25 +54,16 @@ public class CheckboxWidget extends ClickableWidget {
         int labelX = boxX + boxSize + 3;
         int labelY = getY() + (height - 6) / 2;
 
-        //? if >=1.21.8 {
         
-        Matrix3x2f oldMatrix = new Matrix3x2f(context.getMatrices());
+        Matrix3x2f oldMatrix = new Matrix3x2f(context.pose());
         Matrix3x2f scaleMatrix = new Matrix3x2f().scaling(scale, scale);
-        context.getMatrices().mul(scaleMatrix);
+        context.pose().mul(scaleMatrix);
 
         Matrix3x2f translateMatrix = new Matrix3x2f().translation(labelX / scale, labelY / scale);
-        context.getMatrices().mul(translateMatrix);
+        context.pose().mul(translateMatrix);
 
-        context.drawText(textRenderer, getMessage(), 0, 0, 0xFFFFFFFF, false);
-        context.getMatrices().set(oldMatrix);
-        //?} else {
-        /*MatrixStack matrices = context.getMatrices();
-        matrices.push();
-        matrices.scale(scale, scale, scale);
-        matrices.translate(labelX / scale, labelY / scale, 0);
-        context.drawText(textRenderer, getMessage(), 0, 0, 0xFFFFFFFF, false);
-        matrices.pop();
-        *///?}
+        context.text(textRenderer, getMessage(), 0, 0, 0xFFFFFFFF, false);
+        context.pose().set(oldMatrix);
     }
 
     public void setChecked(boolean checked) {
@@ -109,24 +75,24 @@ public class CheckboxWidget extends ClickableWidget {
     }
 
     @Override
-    public void appendClickableNarrations(NarrationMessageBuilder builder) {
-        this.appendDefaultNarrations(builder);
+    public void updateWidgetNarration(NarrationElementOutput builder) {
+        this.defaultButtonNarrationText(builder);
     }
 
     // Builder pattern
-    public static Builder builder(Text text, TextRenderer textRenderer) {
+    public static Builder builder(Component text, Font textRenderer) {
         return new Builder(text, textRenderer);
     }
 
     public static class Builder {
-        private final Text text;
-        private final TextRenderer textRenderer;
+        private final Component text;
+        private final Font textRenderer;
         private int x, y;
         private int width = 100, height = 20;
         private boolean initialState = false;
         private Consumer<Boolean> callback;
 
-        Builder(Text text, TextRenderer textRenderer) {
+        Builder(Component text, Font textRenderer) {
             this.text = text;
             this.textRenderer = textRenderer;
         }

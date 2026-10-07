@@ -1,12 +1,12 @@
 package net.shaddii.smartsorter.blockentity.controller;
 
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 import net.shaddii.smartsorter.util.Category;
 import net.shaddii.smartsorter.util.CategoryManager;
@@ -46,7 +46,7 @@ public class ItemRoutingService {
      * Instead of calling accepts() on every linked probe, each pass walks a
      * per-Item list of candidate probes (see getCandidates).
      */
-    public InsertionResult insertItem(World world, ItemStack stack) {
+    public InsertionResult insertItem(Level world, ItemStack stack) {
         if (world == null || stack.isEmpty()) {
             return new InsertionResult(stack, false, null, null, 0);
         }
@@ -86,7 +86,7 @@ public class ItemRoutingService {
                     insertedIntoName = getChestDisplayName(config);
                 }
 
-                remaining.decrement(inserted);
+                remaining.shrink(inserted);
             }
         }
 
@@ -124,7 +124,7 @@ public class ItemRoutingService {
                     }
                 }
 
-                remaining.decrement(inserted);
+                remaining.shrink(inserted);
             }
         }
 
@@ -156,7 +156,7 @@ public class ItemRoutingService {
      * Probes in unloaded chunks are never looked up (that would force-load
      * the chunk); their chunk loading bumps the epoch.
      */
-    private RouteCandidates getCandidates(World world, List<BlockPos> sortedProbes, Item item, Category itemCategory) {
+    private RouteCandidates getCandidates(Level world, List<BlockPos> sortedProbes, Item item, Category itemCategory) {
         long epoch = RoutingIndexEpoch.get();
         if (indexSource != sortedProbes || indexEpoch != epoch) {
             routeIndex.clear();
@@ -172,7 +172,7 @@ public class ItemRoutingService {
         List<BlockPos> positions = new ArrayList<>(sortedProbes.size());
         List<OutputProbeBlockEntity> probes = new ArrayList<>(sortedProbes.size());
         for (BlockPos probePos : sortedProbes) {
-            if (!world.isChunkLoaded(probePos)) continue;
+            if (!world.hasChunkAt(probePos)) continue;
             if (!(world.getBlockEntity(probePos) instanceof OutputProbeBlockEntity probe)) continue;
 
             ChestConfig config = probe.getChestConfig();
@@ -198,14 +198,14 @@ public class ItemRoutingService {
      * removed (broken, chunk unloaded) - whatever is there now, unless that
      * chunk is unloaded. Either way the index is marked stale.
      */
-    private OutputProbeBlockEntity resolve(World world, RouteCandidates candidates, int i) {
+    private OutputProbeBlockEntity resolve(Level world, RouteCandidates candidates, int i) {
         OutputProbeBlockEntity probe = candidates.probes[i];
         if (!probe.isRemoved()) {
             return probe;
         }
         indexSource = null;
         BlockPos pos = candidates.positions[i];
-        if (!world.isChunkLoaded(pos)) {
+        if (!world.hasChunkAt(pos)) {
             return null;
         }
         return world.getBlockEntity(pos) instanceof OutputProbeBlockEntity fresh ? fresh : null;
@@ -231,27 +231,27 @@ public class ItemRoutingService {
      * Combines stacking + empty slot filling in ONE loop
      */
     private int insertIntoInventorySinglePass(OutputProbeBlockEntity probe, ItemStack stack) {
-        Inventory inv = probe.getTargetInventory();
+        Container inv = probe.getTargetInventory();
         if (inv == null) return 0;
 
         int originalCount = stack.getCount();
-        int maxStackSize = Math.min(stack.getMaxCount(), inv.getMaxCountPerStack());
+        int maxStackSize = Math.min(stack.getMaxStackSize(), inv.getMaxStackSize());
         boolean inventoryChanged = false;
 
-        int size = inv.size();
+        int size = inv.getContainerSize();
 
         // SINGLE PASS: Stack first, then fill empties
         // Pass 1: Try to stack with existing items (prioritize this)
         for (int i = 0; i < size && !stack.isEmpty(); i++) {
-            ItemStack slotStack = inv.getStack(i);
+            ItemStack slotStack = inv.getItem(i);
             if (slotStack.isEmpty()) continue;
 
-            if (ItemStack.areItemsAndComponentsEqual(slotStack, stack)) {
+            if (ItemStack.isSameItemSameComponents(slotStack, stack)) {
                 int canAdd = maxStackSize - slotStack.getCount();
                 if (canAdd > 0) {
                     int toAdd = Math.min(canAdd, stack.getCount());
-                    slotStack.increment(toAdd);
-                    stack.decrement(toAdd);
+                    slotStack.grow(toAdd);
+                    stack.shrink(toAdd);
                     inventoryChanged = true;
                 }
             }
@@ -259,20 +259,20 @@ public class ItemRoutingService {
 
         // Pass 2: Fill empty slots
         for (int i = 0; i < size && !stack.isEmpty(); i++) {
-            ItemStack slotStack = inv.getStack(i);
+            ItemStack slotStack = inv.getItem(i);
             if (!slotStack.isEmpty()) continue;
 
             int toAdd = Math.min(maxStackSize, stack.getCount());
             ItemStack newStack = stack.copy();
             newStack.setCount(toAdd);
-            inv.setStack(i, newStack);
-            stack.decrement(toAdd);
+            inv.setItem(i, newStack);
+            stack.shrink(toAdd);
             inventoryChanged = true;
         }
 
         // BATCHED markDirty
         if (inventoryChanged) {
-            inv.markDirty();
+            inv.setChanged();
         }
 
         return originalCount - stack.getCount();
@@ -281,7 +281,7 @@ public class ItemRoutingService {
     /**
      * OPTIMIZED: Uses location index to skip probes without the item
      */
-    public ItemStack extractItem(World world, ItemVariant variant, int amount,
+    public ItemStack extractItem(Level world, ItemVariant variant, int amount,
                                  NetworkInventoryManager networkManager) {
         if (world == null || amount <= 0) return ItemStack.EMPTY;
 
@@ -311,7 +311,7 @@ public class ItemRoutingService {
      */
     private int extractFromInventory(OutputProbeBlockEntity probe,
                                      ItemVariant variant, int amount) {
-        Inventory inv = probe.getTargetInventory();
+        Container inv = probe.getTargetInventory();
         if (inv == null) return 0;
 
         int extracted = 0;
@@ -320,23 +320,23 @@ public class ItemRoutingService {
         // OPTIMIZATION: Create reference stack once instead of ItemVariant per slot
         ItemStack variantStack = variant.toStack(1);
 
-        for (int i = 0; i < inv.size(); i++) {
+        for (int i = 0; i < inv.getContainerSize(); i++) {
             if (extracted >= amount) break;
 
-            ItemStack stack = inv.getStack(i);
+            ItemStack stack = inv.getItem(i);
             if (stack.isEmpty()) continue;
 
             // OPTIMIZATION: Use ItemStack comparison instead of creating ItemVariant
-            if (!ItemStack.areItemsAndComponentsEqual(stack, variantStack)) continue;
+            if (!ItemStack.isSameItemSameComponents(stack, variantStack)) continue;
 
             int toExtract = Math.min(amount - extracted, stack.getCount());
-            stack.decrement(toExtract);
+            stack.shrink(toExtract);
             extracted += toExtract;
             inventoryChanged = true;
         }
 
         if (inventoryChanged) {
-            inv.markDirty();
+            inv.setChanged();
         }
 
         return extracted;

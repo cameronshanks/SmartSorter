@@ -1,6 +1,6 @@
 package net.shaddii.smartsorter.util;
 
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
 
 /**
  * Common interface for blocks or entities that can link to a Storage Controller.

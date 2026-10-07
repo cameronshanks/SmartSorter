@@ -1,8 +1,8 @@
 package net.shaddii.smartsorter.blockentity.controller;
 
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 import net.shaddii.smartsorter.util.ChestConfig;
 import net.shaddii.smartsorter.util.RoutingIndexEpoch;
@@ -55,8 +55,8 @@ public class ProbeRegistry {
     /**
      * OPTIMIZED: Aggressively cached, minimal world lookups
      */
-    public List<BlockPos> getSortedProbes(World world) {
-        long currentTime = world != null ? world.getTime() : 0;
+    public List<BlockPos> getSortedProbes(Level world) {
+        long currentTime = world != null ? world.getGameTime() : 0;
 
         // A probe loaded with its chunk, or a probe config changed outside
         // the controller: re-sort now instead of at the next 100-tick refresh.
@@ -77,7 +77,7 @@ public class ProbeRegistry {
         return sortedProbesCache;
     }
 
-    public BlockPos getProbeForChest(World world, BlockPos chestPos) {
+    public BlockPos getProbeForChest(Level world, BlockPos chestPos) {
         if (world == null || chestPos == null) return null;
 
         // Rebuild index if dirty
@@ -88,7 +88,7 @@ public class ProbeRegistry {
         return chestToProbe.get(chestPos);
     }
 
-    private void rebuildChestIndex(World world) {
+    private void rebuildChestIndex(Level world) {
         chestToProbe.clear();
 
         for (BlockPos probePos : linkedProbes) {
@@ -104,7 +104,7 @@ public class ProbeRegistry {
         indexDirty = false;
     }
 
-    private void rebuildSortedCache(World world, long currentTime) {
+    private void rebuildSortedCache(Level world, long currentTime) {
         List<ProbeEntry> entries = new ArrayList<>(linkedProbes.size());
 
         for (BlockPos probePos : linkedProbes) {
@@ -115,7 +115,6 @@ public class ProbeRegistry {
 
             entries.add(new ProbeEntry(
                     probePos,
-                    probe.mode,
                     config,
                     getCachedHasItems(world, probePos, probe, currentTime)
             ));
@@ -129,10 +128,7 @@ public class ProbeRegistry {
             if (aPri != bPri) return Integer.compare(bPri, aPri);
 
             // 2. Has items (occupied chests first)
-            if (a.hasItems != b.hasItems) return a.hasItems ? -1 : 1;
-
-            // 3. Mode order
-            return Integer.compare(getModeOrder(a.mode), getModeOrder(b.mode));
+            return Boolean.compare(b.hasItems, a.hasItems);
         });
 
         sortedProbesCache = new ArrayList<>(entries.size());
@@ -147,7 +143,7 @@ public class ProbeRegistry {
     /**
      * CRITICAL OPTIMIZATION: Cache BlockEntity lookups
      */
-    private OutputProbeBlockEntity getCachedProbe(World world, BlockPos pos) {
+    private OutputProbeBlockEntity getCachedProbe(Level world, BlockPos pos) {
         OutputProbeBlockEntity cached = probeCache.get(pos);
 
         if (cached != null) {
@@ -161,7 +157,7 @@ public class ProbeRegistry {
 
         // Never look up a probe in an unloaded chunk (forces a synchronous
         // load); it's just left out of this pass.
-        if (world == null || !world.isChunkLoaded(pos)) {
+        if (world == null || !world.hasChunkAt(pos)) {
             return null;
         }
 
@@ -178,7 +174,7 @@ public class ProbeRegistry {
     /**
      * CRITICAL OPTIMIZATION: Cache hasItems status (expensive to check)
      */
-    private boolean getCachedHasItems(World world, BlockPos probePos,
+    private boolean getCachedHasItems(Level world, BlockPos probePos,
                                       OutputProbeBlockEntity probe, long currentTime) {
         Boolean cached = hasItemsCache.get(probePos);
 
@@ -215,11 +211,11 @@ public class ProbeRegistry {
     /**
      * Validates all probes, removing invalid ones.
      */
-    public void validate(World world) {
+    public void validate(Level world) {
         linkedProbes.removeIf(probePos -> {
             // Probes in unloaded chunks stay linked instead of being
             // force-loaded to check (or dropped as missing).
-            if (world == null || !world.isChunkLoaded(probePos)) {
+            if (world == null || !world.hasChunkAt(probePos)) {
                 return false;
             }
             OutputProbeBlockEntity probe = getCachedProbe(world, probePos);
@@ -232,17 +228,8 @@ public class ProbeRegistry {
         });
     }
 
-    private int getModeOrder(OutputProbeBlockEntity.ProbeMode mode) {
-        return switch (mode) {
-            case FILTER -> 0;
-            case PRIORITY -> 1;
-            case ACCEPT_ALL -> 2;
-        };
-    }
-
     private record ProbeEntry(
             BlockPos pos,
-            OutputProbeBlockEntity.ProbeMode mode,
             ChestConfig config,
             boolean hasItems
     ) {}

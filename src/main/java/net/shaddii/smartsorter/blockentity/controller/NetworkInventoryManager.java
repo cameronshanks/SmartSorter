@@ -1,9 +1,9 @@
 package net.shaddii.smartsorter.blockentity.controller;
 
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 
 import java.util.*;
@@ -38,7 +38,7 @@ public class NetworkInventoryManager {
      * Updates network cache by scanning all probes.
      * Optimized: Reuses maps, batch operations, minimal allocations.
      */
-    public void updateCache(World world, List<BlockPos> probes) {
+    public void updateCache(Level world, List<BlockPos> probes) {
         if (world == null) return;
 
         // OPTIMIZATION: For very large networks (1000+ chests), use sampling
@@ -51,12 +51,12 @@ public class NetworkInventoryManager {
         updateCacheFull(world, probes);
     }
 
-    public void updateCacheForceFull(World world, List<BlockPos> probes) {
+    public void updateCacheForceFull(Level world, List<BlockPos> probes) {
         if (world == null) return;
         updateCacheFull(world, probes);
     }
 
-    private void updateCacheFull(World world, List<BlockPos> probes) {
+    private void updateCacheFull(Level world, List<BlockPos> probes) {
         Map<ItemVariant, Long> newItems = new HashMap<>(networkItems.size());
         itemLocationIndex.clear();
 
@@ -89,7 +89,7 @@ public class NetworkInventoryManager {
         deltaItems.clear();
     }
 
-    private void updateCacheSampled(World world, List<BlockPos> probes) {
+    private void updateCacheSampled(Level world, List<BlockPos> probes) {
         int totalProbes = probes.size();
         int endIndex = Math.min(samplingOffset + SAMPLE_SIZE, totalProbes);
 

@@ -2,15 +2,14 @@ package net.shaddii.smartsorter.chunk;
 
 import java.util.ArrayList;
 import java.util.List;
-
+import net.minecraft.util.datafix.DataFixTypes;
+import net.minecraft.world.level.saveddata.SavedData;
+import net.minecraft.world.level.saveddata.SavedDataType;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
-import net.minecraft.datafixer.DataFixTypes;
-import net.minecraft.world.PersistentState;
-import net.minecraft.world.PersistentStateType;
 
 /**
  * Per-dimension saved data for the chunk keeper: which blocks (by packed
@@ -22,7 +21,7 @@ import net.minecraft.world.PersistentStateType;
  * no SERIALIZE flag), so turning the option off and restarting leaves nothing
  * behind: ChunkKeeper clears this state instead of restoring it.
  */
-public final class KeepLoadedState extends PersistentState {
+public final class KeepLoadedState extends SavedData {
 
     /** Each entry is [ownerPos, chunk, chunk, ...]. */
     private static final Codec<KeepLoadedState> CODEC = RecordCodecBuilder.create(instance -> instance.group(
@@ -31,8 +30,8 @@ public final class KeepLoadedState extends PersistentState {
 
     // DataFixTypes can't be null here (PersistentStateManager.readNbt calls
     // update() on it unconditionally); this type applies no fixes to custom data.
-    public static final PersistentStateType<KeepLoadedState> TYPE = new PersistentStateType<>(
-            "smartsorter_keep_loaded", KeepLoadedState::new, CODEC, DataFixTypes.SAVED_DATA_COMMAND_STORAGE);
+    public static final SavedDataType<KeepLoadedState> TYPE = new SavedDataType<>(
+            net.minecraft.resources.Identifier.fromNamespaceAndPath("smartsorter", "keep_loaded"), KeepLoadedState::new, CODEC, DataFixTypes.SAVED_DATA_COMMAND_STORAGE);
 
     final Long2ObjectOpenHashMap<long[]> owners = new Long2ObjectOpenHashMap<>();
 

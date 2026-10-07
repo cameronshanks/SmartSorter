@@ -1,21 +1,21 @@
 package net.shaddii.smartsorter.widget;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.Element;
-import net.minecraft.client.gui.Drawable;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.function.Consumer;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.Renderable;
+import net.minecraft.client.gui.components.events.GuiEventListener;
 
 /**
  * Minimal search box widget that implements Element & Drawable so it can be added with addDrawableChild(...)
  * - replaced drawBorder() (not present) with simple fills/lines
  * - clipboard paste uses MinecraftClient.getInstance().getWindow().getHandle()
  */
-public class SearchBoxWidget implements Drawable, Element {
-    private final TextRenderer textRenderer;
+public class SearchBoxWidget implements Renderable, GuiEventListener {
+    private final Font textRenderer;
     private int x, y, width, height;
 
     private String text = "";
@@ -33,7 +33,7 @@ public class SearchBoxWidget implements Drawable, Element {
     private static final int PLACEHOLDER_COLOR = 0xFF808080;
     private static final String PLACEHOLDER = "Search...";
 
-    public SearchBoxWidget(TextRenderer textRenderer, int x, int y, int width, int height) {
+    public SearchBoxWidget(Font textRenderer, int x, int y, int width, int height) {
         this.textRenderer = textRenderer;
         this.x = x;
         this.y = y;
@@ -52,34 +52,34 @@ public class SearchBoxWidget implements Drawable, Element {
 
     // Drawable implementation
     @Override
-    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
         // Draw background
         context.fill(x, y, x + width, y + height, BACKGROUND_COLOR);
 
         // Draw border (1px)
         int borderColor = isFocused ? FOCUSED_BORDER_COLOR : BORDER_COLOR;
         // top
-        context.drawHorizontalLine(x, x + width - 1, y, borderColor);
+        context.horizontalLine(x, x + width - 1, y, borderColor);
         // bottom
-        context.drawHorizontalLine(x, x + width - 1, y + height - 1, borderColor);
+        context.horizontalLine(x, x + width - 1, y + height - 1, borderColor);
         // left
-        context.drawVerticalLine(x, y, y + height - 1, borderColor);
+        context.verticalLine(x, y, y + height - 1, borderColor);
         // right
-        context.drawVerticalLine(x + width - 1, y, y + height - 1, borderColor);
+        context.verticalLine(x + width - 1, y, y + height - 1, borderColor);
 
         // Draw text or placeholder
         String displayText = text.isEmpty() && !isFocused ? PLACEHOLDER : text;
         int textColor = text.isEmpty() && !isFocused ? PLACEHOLDER_COLOR : TEXT_COLOR;
 
         // Trim text if too long
-        String trimmedText = textRenderer.trimToWidth(displayText, width - 8);
+        String trimmedText = textRenderer.plainSubstrByWidth(displayText, width - 8);
 
         // Draw text (vertical center)
-        context.drawText(textRenderer, trimmedText, x + 4, y + (height - 8) / 2, textColor, false);
+        context.text(textRenderer, trimmedText, x + 4, y + (height - 8) / 2, textColor, false);
 
         // Draw cursor if focused
         if (isFocused && (tickCounter / 6) % 2 == 0) {
-            int cursorX = x + 4 + textRenderer.getWidth(text.substring(0, Math.min(cursorPosition, text.length())));
+            int cursorX = x + 4 + textRenderer.width(text.substring(0, Math.min(cursorPosition, text.length())));
             context.fill(cursorX, y + 2, cursorX + 1, y + height - 2, TEXT_COLOR);
         }
     }
@@ -120,7 +120,7 @@ public class SearchBoxWidget implements Drawable, Element {
     private int getCursorPositionFromX(int px) {
         int currentX = 0;
         for (int i = 0; i <= text.length(); i++) {
-            int nextX = textRenderer.getWidth(text.substring(0, i));
+            int nextX = textRenderer.width(text.substring(0, i));
             if (px < (currentX + nextX) / 2) {
                 return Math.max(0, i - 1);
             }
@@ -182,7 +182,7 @@ public class SearchBoxWidget implements Drawable, Element {
             case GLFW.GLFW_KEY_V:
                 if (isControlDown()) {
                     // Paste from clipboard (grab client window handle)
-                    long handle = MinecraftClient.getInstance().getWindow().getHandle();
+                    long handle = Minecraft.getInstance().getWindow().handle();
                     String clipboard = GLFW.glfwGetClipboardString(handle);
                     if (clipboard != null && !clipboard.isEmpty()) {
                         // naive paste: append all chars via charTyped to respect validation
@@ -215,7 +215,7 @@ public class SearchBoxWidget implements Drawable, Element {
     // focus is tracked internally
 
     private boolean isControlDown() {
-        long handle = MinecraftClient.getInstance().getWindow().getHandle();
+        long handle = Minecraft.getInstance().getWindow().handle();
         return GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS ||
                 GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS;
     }

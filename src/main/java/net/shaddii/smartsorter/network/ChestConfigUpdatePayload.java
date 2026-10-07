@@ -1,55 +1,55 @@
 package net.shaddii.smartsorter.network;
 
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.util.Category;
 import net.shaddii.smartsorter.util.CategoryManager;
 import net.shaddii.smartsorter.util.ChestConfig;
 
-public record ChestConfigUpdatePayload(ChestConfig config) implements CustomPayload {
+public record ChestConfigUpdatePayload(ChestConfig config) implements CustomPacketPayload {
 
-    public static final Id<ChestConfigUpdatePayload> ID =
-            new Id<>(Identifier.of(SmartSorter.MOD_ID, "chest_config_update"));
+    public static final Type<ChestConfigUpdatePayload> ID =
+            new Type<>(Identifier.fromNamespaceAndPath(SmartSorter.MOD_ID, "chest_config_update"));
 
-    public static final PacketCodec<RegistryByteBuf, ChestConfigUpdatePayload> CODEC =
-            new PacketCodec<>() {
+    public static final StreamCodec<RegistryFriendlyByteBuf, ChestConfigUpdatePayload> CODEC =
+            new StreamCodec<>() {
                 @Override
-                public ChestConfigUpdatePayload decode(RegistryByteBuf buf) {
+                public ChestConfigUpdatePayload decode(RegistryFriendlyByteBuf buf) {
                     return ChestConfigUpdatePayload.read(buf);
                 }
 
                 @Override
-                public void encode(RegistryByteBuf buf, ChestConfigUpdatePayload payload) {
+                public void encode(RegistryFriendlyByteBuf buf, ChestConfigUpdatePayload payload) {
                     ChestConfigUpdatePayload.write(buf, payload);
                 }
             };
 
     @Override
-    public Id<? extends CustomPayload> getId() {
+    public Type<? extends CustomPacketPayload> type() {
         return ID;
     }
 
-    public static void write(RegistryByteBuf buf, ChestConfigUpdatePayload payload) {
+    public static void write(RegistryFriendlyByteBuf buf, ChestConfigUpdatePayload payload) {
         ChestConfig config = payload.config;
 
         // Write position
         buf.writeBlockPos(config.position);
 
         // Write custom name
-        buf.writeString(config.customName != null ? config.customName : "");
+        buf.writeUtf(config.customName != null ? config.customName : "");
 
         // Write filter category
-        buf.writeString(config.filterCategory.asString());
+        buf.writeUtf(config.filterCategory.asString());
 
         // Write priority
         buf.writeVarInt(config.priority);
 
         // Write filter mode
-        buf.writeString(config.filterMode.name());
+        buf.writeUtf(config.filterMode.name());
 
         // Write auto item frame
         buf.writeBoolean(config.autoItemFrame);
@@ -63,28 +63,28 @@ public record ChestConfigUpdatePayload(ChestConfig config) implements CustomPayl
         // ✅ FIX: Write SimplePriority
         if (config.simplePrioritySelection != null) {
             buf.writeBoolean(true); // Has SimplePriority
-            buf.writeString(config.simplePrioritySelection.name());
+            buf.writeUtf(config.simplePrioritySelection.name());
         } else {
             buf.writeBoolean(false); // No SimplePriority
         }
     }
 
-    public static ChestConfigUpdatePayload read(RegistryByteBuf buf) {
+    public static ChestConfigUpdatePayload read(RegistryFriendlyByteBuf buf) {
         // Read position
         BlockPos position = buf.readBlockPos();
 
         // Read custom name
-        String customName = buf.readString();
+        String customName = buf.readUtf();
 
         // Read filter category
-        String categoryStr = buf.readString();
+        String categoryStr = buf.readUtf();
         Category category = CategoryManager.getInstance().getCategory(categoryStr);
 
         // Read priority
         int priority = buf.readVarInt();
 
         // Read filter mode
-        String modeStr = buf.readString();
+        String modeStr = buf.readUtf();
         ChestConfig.FilterMode mode = ChestConfig.FilterMode.valueOf(modeStr);
 
         // Read auto item frame
@@ -103,7 +103,7 @@ public record ChestConfigUpdatePayload(ChestConfig config) implements CustomPayl
         // Read SimplePriority
         boolean hasSimplePriority = buf.readBoolean();
         if (hasSimplePriority) {
-            String simplePriorityStr = buf.readString();
+            String simplePriorityStr = buf.readUtf();
             try {
                 config.simplePrioritySelection = ChestConfig.SimplePriority.valueOf(simplePriorityStr);
             } catch (IllegalArgumentException e) {

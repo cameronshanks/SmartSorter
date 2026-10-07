@@ -6,8 +6,7 @@ import java.util.List;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
-import net.minecraft.item.ItemStack;
-
+import net.minecraft.world.item.ItemStack;
 import net.shaddii.smartsorter.config.SmartSorterConfig;
 
 /**
@@ -76,8 +75,8 @@ public final class IntakeBuffer {
         }
         for (int i = 0; i < this.entries.size(); i++) {
             ItemStack existing = this.entries.get(i).stack;
-            if (ItemStack.areItemsAndComponentsEqual(existing, stack)
-                    && existing.getCount() + stack.getCount() <= existing.getMaxCount()) {
+            if (ItemStack.isSameItemSameComponents(existing, stack)
+                    && existing.getCount() + stack.getCount() <= existing.getMaxStackSize()) {
                 return true;
             }
         }
@@ -91,12 +90,12 @@ public final class IntakeBuffer {
         }
         for (int i = 0; i < this.entries.size() && !stack.isEmpty(); i++) {
             Entry entry = this.entries.get(i);
-            if (ItemStack.areItemsAndComponentsEqual(entry.stack, stack)) {
-                int room = entry.stack.getMaxCount() - entry.stack.getCount();
+            if (ItemStack.isSameItemSameComponents(entry.stack, stack)) {
+                int room = entry.stack.getMaxStackSize() - entry.stack.getCount();
                 if (room > 0) {
                     int moved = Math.min(room, stack.getCount());
-                    entry.stack.increment(moved);
-                    stack.decrement(moved);
+                    entry.stack.grow(moved);
+                    stack.shrink(moved);
                     entry.retryAt = Math.max(entry.retryAt, retryAt);
                 }
             }

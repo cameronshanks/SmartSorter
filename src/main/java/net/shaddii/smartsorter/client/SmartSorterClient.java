@@ -3,16 +3,11 @@ package net.shaddii.smartsorter.client;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.ingame.HandledScreens;
-import net.minecraft.item.ItemStack;
-import net.minecraft.text.HoverEvent;
-import net.minecraft.text.MutableText;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.MenuScreens;
+import net.minecraft.core.BlockPos;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.network.*;
 import net.shaddii.smartsorter.screen.OutputProbeScreen;
@@ -30,16 +25,15 @@ public class SmartSorterClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
-        registerBlockRenderLayers();
         CategoryManager.getInstance();
 
         // Register screens
-        HandledScreens.register(SmartSorter.STORAGE_CONTROLLER_SCREEN_HANDLER, StorageControllerScreen::new);
-        HandledScreens.register(SmartSorter.OUTPUT_PROBE_SCREEN_HANDLER, OutputProbeScreen::new);
+        MenuScreens.register(SmartSorter.STORAGE_CONTROLLER_SCREEN_HANDLER, StorageControllerScreen::new);
+        MenuScreens.register(SmartSorter.OUTPUT_PROBE_SCREEN_HANDLER, OutputProbeScreen::new);
 
         // Register HUD overlays
-        HudRenderCallback.EVENT.register((drawContext, tickDelta) -> {
-            if (MinecraftClient.getInstance().currentScreen == null) {
+        HudElementRegistry.addLast(SmartSorter.id("hud_overlays"), (drawContext, tickDelta) -> {
+            if (Minecraft.getInstance().screen == null) {
                 SortProgressOverlay.render(drawContext);
                 OverflowNotificationOverlay.render(drawContext, 0f);
             }
@@ -65,7 +59,7 @@ public class SmartSorterClient implements ClientModInitializer {
                 StorageControllerSyncPacket.SyncPayload.ID_PAYLOAD,
                 (payload, context) -> context.client().execute(() -> {
                     if (context.player() != null &&
-                            context.player().currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+                            context.player().containerMenu instanceof StorageControllerScreenHandler handler) {
 
                         handler.updateNetworkItems(payload.items());
                         handler.updateStoredXp(payload.storedXp());
@@ -77,9 +71,9 @@ public class SmartSorterClient implements ClientModInitializer {
                         }
                         // DON'T clear chest configs - they're sent separately
 
-                        handler.setCursorStack(payload.cursorStack());
+                        handler.setCarried(payload.cursorStack());
 
-                        if (context.client().currentScreen instanceof StorageControllerScreen screen) {
+                        if (context.client().screen instanceof StorageControllerScreen screen) {
                             screen.markDirty();
                         }
                     }
@@ -92,11 +86,11 @@ public class SmartSorterClient implements ClientModInitializer {
                 ChestConfigBatchPayload.ID,
                 (payload, context) -> context.client().execute(() -> {
                     if (context.player() != null &&
-                            context.player().currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+                            context.player().containerMenu instanceof StorageControllerScreenHandler handler) {
 
                         handler.updateChestConfigs(payload.configs());
 
-                        if (context.client().currentScreen instanceof StorageControllerScreen screen) {
+                        if (context.client().screen instanceof StorageControllerScreen screen) {
                             screen.markDirty();
                         }
                     }
@@ -110,20 +104,20 @@ public class SmartSorterClient implements ClientModInitializer {
 
                     if (context.client().player != null) {
                         // Handle controller screen
-                        if (context.client().player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+                        if (context.client().player.containerMenu instanceof StorageControllerScreenHandler handler) {
                             Map<BlockPos, ChestConfig> singleUpdate = new HashMap<>();
                             singleUpdate.put(payload.config().position, payload.config());
                             handler.updateChestConfigs(singleUpdate);
 
-                            if (context.client().currentScreen instanceof StorageControllerScreen screen) {
+                            if (context.client().screen instanceof StorageControllerScreen screen) {
                                 screen.markDirty();
                             }
                         }
                         // Handle probe screen
-                        else if (context.client().player.currentScreenHandler instanceof OutputProbeScreenHandler handler) {
+                        else if (context.client().player.containerMenu instanceof OutputProbeScreenHandler handler) {
                             handler.setChestConfig(payload.config());
 
-                            if (context.client().currentScreen instanceof OutputProbeScreen screen) {
+                            if (context.client().screen instanceof OutputProbeScreen screen) {
                                 screen.refreshConfig();
                             }
                         }
@@ -136,11 +130,11 @@ public class SmartSorterClient implements ClientModInitializer {
                 ProbeStatsSyncPayload.ID,
                 (payload, context) -> context.client().execute(() -> {
                     if (context.player() != null &&
-                            context.player().currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+                            context.player().containerMenu instanceof StorageControllerScreenHandler handler) {
 
                         handler.updateProbeStats(payload.position(), payload.itemsProcessed());
 
-                        if (context.client().currentScreen instanceof StorageControllerScreen screen) {
+                        if (context.client().screen instanceof StorageControllerScreen screen) {
                             screen.updateProbeStats(payload.position(), payload.itemsProcessed());
                             screen.markDirty();
                         }
@@ -153,11 +147,11 @@ public class SmartSorterClient implements ClientModInitializer {
                 ProbeConfigBatchPayload.ID,
                 (payload, context) -> context.client().execute(() -> {
                     if (context.player() != null &&
-                            context.player().currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+                            context.player().containerMenu instanceof StorageControllerScreenHandler handler) {
 
                         handler.updateProbeConfigs(payload.configs());
 
-                        if (context.client().currentScreen instanceof StorageControllerScreen screen) {
+                        if (context.client().screen instanceof StorageControllerScreen screen) {
                             screen.markDirty();
                         }
                     }
@@ -170,11 +164,11 @@ public class SmartSorterClient implements ClientModInitializer {
                 (payload, context) -> context.client().execute(() -> {
 
                     if (context.client().player != null &&
-                            context.client().player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+                            context.client().player.containerMenu instanceof StorageControllerScreenHandler handler) {
 
                         handler.applyPriorityUpdatesFromServer(payload.updates());
 
-                        if (context.client().currentScreen instanceof StorageControllerScreen screen) {
+                        if (context.client().screen instanceof StorageControllerScreen screen) {
                             screen.onPriorityUpdate();
                         }
                     }
@@ -197,7 +191,7 @@ public class SmartSorterClient implements ClientModInitializer {
                 StorageDeltaSyncPayload.ID,
                 (payload, context) -> context.client().execute(() -> {
                     if (context.player() != null &&
-                            context.player().currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+                            context.player().containerMenu instanceof StorageControllerScreenHandler handler) {
 
                         // Create a mutable copy of current items
                         Map<ItemVariant, Long> updatedItems = new HashMap<>(handler.getNetworkItems());
@@ -214,7 +208,7 @@ public class SmartSorterClient implements ClientModInitializer {
                         // Update handler with the modified map
                         handler.updateNetworkItems(updatedItems);
 
-                        if (context.client().currentScreen instanceof StorageControllerScreen screen) {
+                        if (context.client().screen instanceof StorageControllerScreen screen) {
                             screen.markDirty();
                         }
                     }
@@ -239,7 +233,7 @@ public class SmartSorterClient implements ClientModInitializer {
                     CategoryManager.getInstance().updateFromServer(payload.categories());
 
                     // Refresh screen if open
-                    if (context.client().currentScreen instanceof StorageControllerScreen screen) {
+                    if (context.client().screen instanceof StorageControllerScreen screen) {
                         screen.markDirty();
                     }
                 })
@@ -247,43 +241,11 @@ public class SmartSorterClient implements ClientModInitializer {
 
     }
 
-    private void registerBlockRenderLayers() {
-        //? if <1.21.8 {
-    /*// For 1.21.1 - Uses the old API
-    net.fabricmc.fabric.api.blockrenderlayer.v1.BlockRenderLayerMap.INSTANCE.putBlock(
-        SmartSorter.INTAKE_BLOCK, net.minecraft.client.render.RenderLayer.getSolid()
-    );
-    net.fabricmc.fabric.api.blockrenderlayer.v1.BlockRenderLayerMap.INSTANCE.putBlock(
-        SmartSorter.PROBE_BLOCK, net.minecraft.client.render.RenderLayer.getSolid()
-    );
-    net.fabricmc.fabric.api.blockrenderlayer.v1.BlockRenderLayerMap.INSTANCE.putBlock(
-        SmartSorter.PROCESS_PROBE_BLOCK, net.minecraft.client.render.RenderLayer.getSolid()
-    );
-    net.fabricmc.fabric.api.blockrenderlayer.v1.BlockRenderLayerMap.INSTANCE.putBlock(
-        SmartSorter.STORAGE_CONTROLLER_BLOCK, net.minecraft.client.render.RenderLayer.getSolid()
-    );
-    *///?} else {
-        // For 1.21.8+ - Uses BlockRenderLayer enum
-        net.fabricmc.fabric.api.client.rendering.v1.BlockRenderLayerMap.putBlock(
-                SmartSorter.INTAKE_BLOCK, net.minecraft.client.render.BlockRenderLayer.SOLID
-        );
-        net.fabricmc.fabric.api.client.rendering.v1.BlockRenderLayerMap.putBlock(
-                SmartSorter.PROBE_BLOCK, net.minecraft.client.render.BlockRenderLayer.SOLID
-        );
-        net.fabricmc.fabric.api.client.rendering.v1.BlockRenderLayerMap.putBlock(
-                SmartSorter.PROCESS_PROBE_BLOCK, net.minecraft.client.render.BlockRenderLayer.SOLID
-        );
-        net.fabricmc.fabric.api.client.rendering.v1.BlockRenderLayerMap.putBlock(
-                SmartSorter.STORAGE_CONTROLLER_BLOCK, net.minecraft.client.render.BlockRenderLayer.SOLID
-        );
-        //?}
-    }
-
     private void registerOverflowInputHandlers() {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (client.player == null || client.currentScreen != null) return;
+            if (client.player == null || client.screen != null) return;
 
-            long window = client.getWindow().getHandle();
+            long window = client.getWindow().handle();
 
             if (GLFW.glfwGetKey(window, GLFW.GLFW_KEY_X) == GLFW.GLFW_PRESS) {
                 if (OverflowNotificationOverlay.isActive()) {

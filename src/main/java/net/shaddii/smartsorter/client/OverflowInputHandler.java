@@ -2,7 +2,7 @@ package net.shaddii.smartsorter.client;
 
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents;
-import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.screens.Screen;
 
 public class OverflowInputHandler {
 
@@ -21,14 +21,8 @@ public class OverflowInputHandler {
         });
 
         // Mouse click
-        //? if >=1.21.9 {
         ScreenMouseEvents.allowMouseClick(screen).register((scr, click) -> {
             return !OverflowNotificationOverlay.handleMouseClick(click.x(), click.y(), click.button());
         });
-        //?} else {
-        /*ScreenMouseEvents.allowMouseClick(screen).register((scr, mouseX, mouseY, button) -> {
-            return !OverflowNotificationOverlay.handleMouseClick(mouseX, mouseY, button);
-        });
-        *///?}
     }
 }

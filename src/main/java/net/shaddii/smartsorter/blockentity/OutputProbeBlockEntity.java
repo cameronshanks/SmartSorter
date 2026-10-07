@@ -1,34 +1,11 @@
 package net.shaddii.smartsorter.blockentity;
 
 import com.mojang.serialization.DataResult;
-import net.fabricmc.fabric.api.screenhandler.v1.ExtendedScreenHandlerFactory;
-import net.fabricmc.fabric.api.transfer.v1.item.InventoryStorage;
+import net.fabricmc.fabric.api.menu.v1.ExtendedMenuProvider;
+import net.fabricmc.fabric.api.transfer.v1.item.ContainerStorage;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemStorage;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
 import net.fabricmc.fabric.api.transfer.v1.storage.Storage;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.ChestBlock;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.block.enums.ChestType;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.inventory.DoubleInventory;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.listener.ClientPlayPacketListener;
-import net.minecraft.network.packet.Packet;
-import net.minecraft.network.packet.s2c.play.BlockEntityUpdateS2CPacket;
-import net.minecraft.registry.RegistryWrapper;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.world.World;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.block.OutputProbeBlock;
 import net.shaddii.smartsorter.chunk.ChunkKeeper;
@@ -41,38 +18,58 @@ import net.shaddii.smartsorter.util.ChestConfig;
 import net.shaddii.smartsorter.util.ChestSnapshot;
 import net.shaddii.smartsorter.util.RoutingIndexEpoch;
 import net.shaddii.smartsorter.util.SortUtil;
-//? if >=1.21.8 {
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtOps;
-import net.minecraft.text.TextCodecs;
-import net.minecraft.storage.ReadView;
-import net.minecraft.storage.WriteView;
-//?}
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.ComponentSerialization;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.Packet;
+import net.minecraft.network.protocol.game.ClientGamePacketListener;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.CompoundContainer;
+import net.minecraft.world.Container;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.ChestBlock;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.ChestType;
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
 
-public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScreenHandlerFactory {
+public class OutputProbeBlockEntity extends BlockEntity implements ExtendedMenuProvider {
     // ========================================
     // DATA RECORD
     // ========================================
     public record ProbeData(BlockPos chestPos, @Nullable ChestConfig config) {
-        public static final PacketCodec<RegistryByteBuf, ProbeData> CODEC = PacketCodec.of(
+        public static final StreamCodec<RegistryFriendlyByteBuf, ProbeData> CODEC = StreamCodec.ofMember(
                 (value, buf) -> {
                     buf.writeBlockPos(value.chestPos);
                     buf.writeBoolean(value.config != null);
                     if (value.config != null) {
                         buf.writeBlockPos(value.config.position);
-                        buf.writeString(value.config.customName != null ? value.config.customName : "");
-                        buf.writeString(value.config.filterCategory.asString());
+                        buf.writeUtf(value.config.customName != null ? value.config.customName : "");
+                        buf.writeUtf(value.config.filterCategory.asString());
                         buf.writeVarInt(value.config.priority);
-                        buf.writeString(value.config.filterMode.name());
+                        buf.writeUtf(value.config.filterMode.name());
                         buf.writeBoolean(value.config.strictNBTMatch);
                         buf.writeBoolean(value.config.autoItemFrame);
 
                         if (value.config.simplePrioritySelection != null) {
                             buf.writeBoolean(true);
-                            buf.writeString(value.config.simplePrioritySelection.name());
+                            buf.writeUtf(value.config.simplePrioritySelection.name());
                         } else {
                             buf.writeBoolean(false);
                         }
@@ -85,10 +82,10 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
 
                     if (hasConfig) {
                         BlockPos configPos = buf.readBlockPos();
-                        String customName = buf.readString();
-                        String categoryId = buf.readString();
+                        String customName = buf.readUtf();
+                        String categoryId = buf.readUtf();
                         int priority = buf.readVarInt();
-                        String filterMode = buf.readString();
+                        String filterMode = buf.readUtf();
                         boolean strictNBT = buf.readBoolean();
                         boolean autoFrame = buf.readBoolean();
 
@@ -102,7 +99,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
 
                         boolean hasSimplePriority = buf.readBoolean();
                         if (hasSimplePriority) {
-                            String simplePriorityStr = buf.readString();
+                            String simplePriorityStr = buf.readUtf();
                             try {
                                 config.simplePrioritySelection = ChestConfig.SimplePriority.valueOf(simplePriorityStr);
                             } catch (Exception e) {
@@ -119,16 +116,6 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     }
 
     // ========================================
-    // ENUMS
-    // ========================================
-
-    public enum ProbeMode {
-        FILTER,
-        ACCEPT_ALL,
-        PRIORITY
-    }
-
-    // ========================================
     // CONSTANTS
     // ========================================
 
@@ -137,12 +124,6 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     // ========================================
     // FIELDS
     // ========================================
-
-    // Configuration
-    public boolean ignoreComponents = true;
-    public boolean useTags = false;
-    public boolean requireAllTags = false;
-    public ProbeMode mode = ProbeMode.FILTER;
 
     // Local chest configuration storage
     private ChestConfig localChestConfig = null;
@@ -162,7 +143,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     // Target caches (see getTargetPos / getTargetInventory / accepts)
     private BlockState targetPosForState;
     private BlockPos cachedTargetPos;
-    private Inventory cachedInventory;
+    private Container cachedInventory;
     private BlockEntity cachedPrimary;
     private BlockEntity cachedSecondary;
     private BlockState cachedInventoryForState;
@@ -181,8 +162,8 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     // ========================================
 
     // Initialize chest config when probe is placed
-    public void onPlaced(World world) {
-        if (world.isClient()) return;
+    public void onPlaced(Level world) {
+        if (world.isClientSide()) return;
 
         BlockPos targetPos = getTargetPos();
         if (targetPos != null && localChestConfig == null) {
@@ -202,29 +183,22 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
             // Try to read existing name from chest
             BlockEntity be = world.getBlockEntity(targetPos);
             if (be != null) {
-                NbtCompound nbt = be.createNbt(world.getRegistryManager());
+                CompoundTag nbt = be.saveWithoutMetadata(world.registryAccess());
                 if (nbt.contains("CustomName")) {
                     try {
-                        //? if >=1.21.8 {
-                        DataResult<Text> result = TextCodecs.CODEC.parse(
-                                world.getRegistryManager().getOps(NbtOps.INSTANCE),
+                        DataResult<Component> result = ComponentSerialization.CODEC.parse(
+                                world.registryAccess().createSerializationContext(NbtOps.INSTANCE),
                                 nbt.get("CustomName")
                         );
                         result.result().ifPresent(text ->
                                 localChestConfig.customName = text.getString()
                         );
-                        //?} else {
-                /*Text customName = Text.Serialization.fromJson(nbt.getString("CustomName"), world.getRegistryManager());
-                if (customName != null) {
-                    localChestConfig.customName = customName.getString();
-                }
-                *///?}
                     } catch (Exception ignored) {}
                 }
             }
 
             localChestConfig.updateHiddenPriority();
-            markDirty();
+            setChanged();
         }
     }
 
@@ -232,8 +206,8 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     // TICK LOGIC
     // ========================================
 
-    public static void tick(World world, BlockPos pos, BlockState state, OutputProbeBlockEntity be) {
-        if (world.isClient()) return;
+    public static void tick(Level world, BlockPos pos, BlockState state, OutputProbeBlockEntity be) {
+        if (world.isClientSide()) return;
 
         if (be.needsInitialSync) {
             be.needsInitialSync = false;
@@ -241,18 +215,18 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
         }
 
         // Validate linked blocks periodically
-        if (world.getTime() % VALIDATION_INTERVAL == 0) {
+        if (world.getGameTime() % VALIDATION_INTERVAL == 0) {
             be.validateLinkedBlocks();
         }
     }
 
     private void validateLinkedBlocks() {
-        if (world == null) return;
+        if (level == null) return;
 
         // Links in unloaded chunks are kept: looking them up would force-load the chunk.
         boolean removedAny = linkedBlocks.removeIf(blockPos -> {
-            if (!world.isChunkLoaded(blockPos)) return false;
-            BlockEntity be = world.getBlockEntity(blockPos);
+            if (!level.hasChunkAt(blockPos)) return false;
+            BlockEntity be = level.getBlockEntity(blockPos);
             return !(be instanceof StorageControllerBlockEntity || be instanceof IntakeBlockEntity);
         });
 
@@ -273,7 +247,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
         BlockPos targetPos = getTargetPos();
         if (targetPos == null) return null;
 
-        long currentTime = world != null ? world.getTime() : 0;
+        long currentTime = level != null ? level.getGameTime() : 0;
 
         // Return cached if still valid
         if (cachedConfig != null && currentTime < cacheValidUntil) {
@@ -282,11 +256,11 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
 
         // Try controller first
         for (BlockPos blockPos : linkedBlocks) {
-            if (world == null) break;
+            if (level == null) break;
             // A controller in an unloaded chunk is skipped (falls back to the
             // local copy) instead of being force-loaded.
-            if (!world.isChunkLoaded(blockPos)) continue;
-            BlockEntity be = world.getBlockEntity(blockPos);
+            if (!level.hasChunkAt(blockPos)) continue;
+            BlockEntity be = level.getBlockEntity(blockPos);
             if (be instanceof StorageControllerBlockEntity controller) {
                 ChestConfig controllerConfig = controller.getChestConfig(targetPos);
                 if (controllerConfig != null) {
@@ -358,11 +332,11 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
 
         invalidateConfigCache();
         RoutingIndexEpoch.bump();
-        markDirty();
+        setChanged();
 
-        if (world != null) {
-            BlockState state = getCachedState();
-            world.updateListeners(pos, state, state, 3);
+        if (level != null) {
+            BlockState state = getBlockState();
+            level.sendBlockUpdated(worldPosition, state, state, 3);
         }
 
         syncConfigToController();
@@ -372,14 +346,14 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
      * Sync local config to linked controller
      */
     private void syncConfigToController() {
-        if (world == null || world.isClient() || localChestConfig == null) return;
+        if (level == null || level.isClientSide() || localChestConfig == null) return;
 
         for (BlockPos blockPos : linkedBlocks) {
-            BlockEntity be = world.getBlockEntity(blockPos);
+            BlockEntity be = level.getBlockEntity(blockPos);
             if (be instanceof StorageControllerBlockEntity controller) {
                 // Controller's updateChestConfig handles priority shifting
                 controller.updateChestConfig(localChestConfig.position, localChestConfig);
-                controller.markDirty();
+                controller.setChanged();
             }
         }
     }
@@ -389,15 +363,15 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     // ========================================
 
     public boolean addLinkedBlock(BlockPos blockPos) {
-        if (world == null) return false;
+        if (level == null) return false;
 
-        BlockEntity newBE = world.getBlockEntity(blockPos);
+        BlockEntity newBE = level.getBlockEntity(blockPos);
 
         // If it's a controller, REMOVE ALL STALE CONTROLLER LINKS FIRST
         if (newBE instanceof StorageControllerBlockEntity) {
             // Remove any position that CLAIMS to be a controller but isn't valid anymore
             linkedBlocks.removeIf(existingPos -> {
-                BlockEntity existingBE = world.getBlockEntity(existingPos);
+                BlockEntity existingBE = level.getBlockEntity(existingPos);
 
                 // Remove if:
                 // 1. No block entity at that position
@@ -410,11 +384,11 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
         if (!linkedBlocks.contains(blockPos)) {
             linkedBlocks.add(blockPos);
             linkedBlocksCopyDirty = true;
-            markDirty();
+            setChanged();
 
-            if (world != null) {
-                BlockState state = world.getBlockState(pos);
-                world.updateListeners(pos, state, state, 3);
+            if (level != null) {
+                BlockState state = level.getBlockState(worldPosition);
+                level.sendBlockUpdated(worldPosition, state, state, 3);
 
                 // Sync config
                 if (newBE instanceof StorageControllerBlockEntity controller && localChestConfig != null) {
@@ -432,11 +406,11 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
         boolean removed = linkedBlocks.remove(blockPos);
         if (removed) {
             linkedBlocksCopyDirty = true;
-            markDirty();
+            setChanged();
 
-            if (world != null) {
-                BlockState state = world.getBlockState(pos);
-                world.updateListeners(pos, state, state, 3);
+            if (level != null) {
+                BlockState state = level.getBlockState(worldPosition);
+                level.sendBlockUpdated(worldPosition, state, state, 3);
             }
             updateLinkedState();
         }
@@ -452,22 +426,22 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     }
 
     public void updateLinkedState() {
-        if (world != null && !world.isClient()) {
-            BlockState currentState = world.getBlockState(pos);
-            if (currentState.isOf(SmartSorter.PROBE_BLOCK)) {
+        if (level != null && !level.isClientSide()) {
+            BlockState currentState = level.getBlockState(worldPosition);
+            if (currentState.is(SmartSorter.PROBE_BLOCK)) {
                 // Check if any linked block is a controller
                 boolean isLinked = false;
                 for (BlockPos blockPos : linkedBlocks) {
-                    BlockEntity be = world.getBlockEntity(blockPos);
+                    BlockEntity be = level.getBlockEntity(blockPos);
                     if (be instanceof StorageControllerBlockEntity) {
                         isLinked = true;
                         break;
                     }
                 }
 
-                BlockState newState = currentState.with(OutputProbeBlock.LINKED, isLinked);
+                BlockState newState = currentState.setValue(OutputProbeBlock.LINKED, isLinked);
                 if (currentState != newState) {
-                    world.setBlockState(pos, newState, 3);
+                    level.setBlock(worldPosition, newState, 3);
                 }
             }
         }
@@ -479,12 +453,12 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
 
         this.localChestConfig = config.copy();
         RoutingIndexEpoch.bump();
-        markDirty();
+        setChanged();
 
         // Sync to world for client updates
-        if (world != null) {
-            BlockState state = getCachedState();
-            world.updateListeners(pos, state, state, 3);
+        if (level != null) {
+            BlockState state = getBlockState();
+            level.sendBlockUpdated(worldPosition, state, state, 3);
         }
     }
 
@@ -499,10 +473,10 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
 
     @Deprecated
     public BlockPos getLinkedController() {
-        if (world == null) return null;
+        if (level == null) return null;
 
         for (BlockPos blockPos : linkedBlocks) {
-            BlockEntity be = world.getBlockEntity(blockPos);
+            BlockEntity be = level.getBlockEntity(blockPos);
             if (be instanceof StorageControllerBlockEntity) {
                 return blockPos;
             }
@@ -516,29 +490,29 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
 
     /** Cached per block-state object: a rotation swaps the state, so it's picked up for free. */
     public BlockPos getTargetPos() {
-        if (world == null) return null;
-        BlockState state = getCachedState();
+        if (level == null) return null;
+        BlockState state = getBlockState();
         if (state != targetPosForState) {
-            cachedTargetPos = pos.offset(state.get(OutputProbeBlock.FACING));
+            cachedTargetPos = worldPosition.relative(state.getValue(OutputProbeBlock.FACING));
             targetPosForState = state;
         }
         return cachedTargetPos;
     }
 
     public Storage<ItemVariant> getTargetStorage() {
-        if (world == null) return null;
+        if (level == null) return null;
 
-        Direction face = getCachedState().get(OutputProbeBlock.FACING);
-        BlockPos targetPos = pos.offset(face);
+        Direction face = getBlockState().getValue(OutputProbeBlock.FACING);
+        BlockPos targetPos = worldPosition.relative(face);
 
-        Storage<ItemVariant> sidedStorage = ItemStorage.SIDED.find(world, targetPos, face.getOpposite());
+        Storage<ItemVariant> sidedStorage = ItemStorage.SIDED.find(level, targetPos, face.getOpposite());
         if (sidedStorage != null) return sidedStorage;
 
-        Storage<ItemVariant> storage = ItemStorage.SIDED.find(world, targetPos, null);
+        Storage<ItemVariant> storage = ItemStorage.SIDED.find(level, targetPos, null);
         if (storage != null) return storage;
 
-        Inventory inv = getTargetInventory();
-        if (inv != null) return InventoryStorage.of(inv, null);
+        Container inv = getTargetInventory();
+        if (inv != null) return ContainerStorage.of(inv, null);
 
         return null;
     }
@@ -553,11 +527,11 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
      * chunk load): returns null so the probe is skipped this pass, and asks
      * the chunk keeper for that chunk if keepChunksLoaded is on.
      */
-    public Inventory getTargetInventory() {
-        if (world == null) return null;
+    public Container getTargetInventory() {
+        if (level == null) return null;
 
-        BlockState probeState = getCachedState();
-        Inventory cached = cachedInventory;
+        BlockState probeState = getBlockState();
+        Container cached = cachedInventory;
         if (cached != null
                 && cachedInventoryForState == probeState
                 && !cachedPrimary.isRemoved()
@@ -567,33 +541,33 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
         clearInventoryCache();
 
         BlockPos targetPos = getTargetPos();
-        if (!world.isChunkLoaded(targetPos)) {
+        if (!level.hasChunkAt(targetPos)) {
             requestChunk(targetPos);
             return null;
         }
 
-        BlockState targetState = world.getBlockState(targetPos);
+        BlockState targetState = level.getBlockState(targetPos);
 
         // Handle regular chests (single or double)
         if (targetState.getBlock() instanceof ChestBlock chestBlock) {
             BlockPos partnerPos = null;
-            if (targetState.contains(ChestBlock.CHEST_TYPE) && targetState.get(ChestBlock.CHEST_TYPE) != ChestType.SINGLE) {
-                partnerPos = targetPos.offset(ChestBlock.getFacing(targetState));
-                if (!world.isChunkLoaded(partnerPos)) {
+            if (targetState.hasProperty(ChestBlock.TYPE) && targetState.getValue(ChestBlock.TYPE) != ChestType.SINGLE) {
+                partnerPos = targetPos.relative(ChestBlock.getConnectedDirection(targetState));
+                if (!level.hasChunkAt(partnerPos)) {
                     // ChestBlock.getInventory would read the other half and force-load its chunk.
                     requestChunk(partnerPos);
                     return null;
                 }
             }
 
-            Inventory chestInv = ChestBlock.getInventory(chestBlock, targetState, world, targetPos, true);
+            Container chestInv = ChestBlock.getContainer(chestBlock, targetState, level, targetPos, true);
             if (chestInv != null) {
-                BlockEntity primary = world.getBlockEntity(targetPos);
-                BlockEntity secondary = chestInv instanceof DoubleInventory && partnerPos != null
-                        ? world.getBlockEntity(partnerPos) : null;
+                BlockEntity primary = level.getBlockEntity(targetPos);
+                BlockEntity secondary = chestInv instanceof CompoundContainer && partnerPos != null
+                        ? level.getBlockEntity(partnerPos) : null;
                 // Only cache when every backing block entity was found, so the
                 // isRemoved() checks above really cover the inventory.
-                if (primary != null && (secondary != null || !(chestInv instanceof DoubleInventory))) {
+                if (primary != null && (secondary != null || !(chestInv instanceof CompoundContainer))) {
                     storeInventory(chestInv, primary, secondary, probeState);
                 }
                 return chestInv;
@@ -601,7 +575,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
         }
 
         // Handle other inventories
-        if (world.getBlockEntity(targetPos) instanceof Inventory inv) {
+        if (level.getBlockEntity(targetPos) instanceof Container inv) {
             storeInventory(inv, (BlockEntity) inv, null, probeState);
             return inv;
         }
@@ -609,7 +583,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
         return null;
     }
 
-    private void storeInventory(Inventory inv, BlockEntity primary, BlockEntity secondary, BlockState probeState) {
+    private void storeInventory(Container inv, BlockEntity primary, BlockEntity secondary, BlockState probeState) {
         cachedInventory = inv;
         cachedPrimary = primary;
         cachedSecondary = secondary;
@@ -617,13 +591,13 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     }
 
     private void requestChunk(BlockPos chunkOf) {
-        if (SmartSorterConfig.keepChunksLoaded && world instanceof ServerWorld serverWorld) {
-            ChunkKeeper.requestExtraChunk(serverWorld, pos, chunkOf);
+        if (SmartSorterConfig.keepChunksLoaded && level instanceof ServerLevel serverWorld) {
+            ChunkKeeper.requestExtraChunk(serverWorld, worldPosition, chunkOf);
         }
     }
 
     /** Sum of the backing block entities' markDirty() counters; MIN_VALUE when not cached. */
-    private long contentsVersion(Inventory inv) {
+    private long contentsVersion(Container inv) {
         if (inv != cachedInventory || cachedPrimary == null) {
             return Long.MIN_VALUE;
         }
@@ -639,8 +613,8 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
      * markDirty() counter moved), the inventory was re-resolved, the config
      * cache was invalidated, or chestCacheMaxAgeTicks passed.
      */
-    private ChestSnapshot currentSnapshot(Inventory inv) {
-        long now = world != null ? world.getTime() : 0L;
+    private ChestSnapshot currentSnapshot(Container inv) {
+        long now = level != null ? level.getGameTime() : 0L;
         if (!snapshot.isCurrent(inv, contentsVersion(inv), now, SmartSorterConfig.chestCacheMaxAgeTicks)) {
             snapshot.rebuild(inv, now);
             // Read after the scan: generating loot can mark the chest dirty.
@@ -651,7 +625,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
 
     /** Whether the target chest holds any item (answered from the snapshot). */
     public boolean targetHasItems() {
-        Inventory inv = getTargetInventory();
+        Container inv = getTargetInventory();
         return inv != null && !currentSnapshot(inv).isEmpty();
     }
 
@@ -668,9 +642,9 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
      * so a chest of single placeholder items keeps accepting those items.
      */
     public boolean accepts(ItemVariant incoming) {
-        if (world == null) return false;
+        if (level == null) return false;
 
-        Inventory inv = getTargetInventory();
+        Container inv = getTargetInventory();
         if (inv == null) return false;
 
         ChestSnapshot contents = currentSnapshot(inv);
@@ -714,52 +688,33 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
             }
         }
 
-        // Fallback to probe mode
-        if (mode == ProbeMode.ACCEPT_ALL || mode == ProbeMode.PRIORITY) {
-            return true;
-        }
-
-        if (mode == ProbeMode.FILTER) {
-            if (useTags) {
-                return SortUtil.acceptsByInventoryTags(inv, incoming, requireAllTags);
-            }
-            return ignoreComponents ? contents.containsItem(incoming.getItem()) : contents.containsVariant(incoming);
-        }
-
         return false;
     }
 
     public boolean contains(ItemVariant variant) {
-        if (world == null) return false;
-        Inventory inv = getTargetInventory();
+        if (level == null) return false;
+        Container inv = getTargetInventory();
         return inv != null && currentSnapshot(inv).containsVariant(variant);
     }
 
     public boolean hasSpace(ItemVariant variant, int amount) {
-        Inventory inv = getTargetInventory();
+        Container inv = getTargetInventory();
         return inv != null && currentSnapshot(inv).hasRoomFor(variant);
     }
 
     // ========================================
-    // MODE MANAGEMENT
+    // STATUS
     // ========================================
 
-    public void cycleMode() {
-        mode = switch (mode) {
-            case FILTER -> ProbeMode.ACCEPT_ALL;
-            case ACCEPT_ALL -> ProbeMode.FILTER;
-            case PRIORITY -> ProbeMode.FILTER;
-        };
-        RoutingIndexEpoch.bump();
-        markDirty();
-    }
-
-    public String getModeName() {
-        return switch (mode) {
-            case FILTER -> "Filter Mode";
-            case ACCEPT_ALL -> "Accept All";
-            case PRIORITY -> "Priority Mode";
-        };
+    /** What this probe currently sends to its chest, e.g. "General Storage" or "Custom (whitelist: 3 items)". */
+    public String getFilterSummary() {
+        ChestConfig config = getChestConfig();
+        if (config == null) return "Not facing an inventory";
+        if (config.filterMode == ChestConfig.FilterMode.CUSTOM && config.whitelistEnabled) {
+            int n = config.getWhitelist().size();
+            return "Custom (whitelist: " + n + (n == 1 ? " item)" : " items)");
+        }
+        return config.filterMode.getDisplayName();
     }
 
     // ========================================
@@ -767,23 +722,23 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     // ========================================
 
     @Override
-    public Text getDisplayName() {
-        return Text.literal("Output Probe");
+    public Component getDisplayName() {
+        return Component.literal("Output Probe");
     }
 
     @Nullable
     @Override
-    public ScreenHandler createMenu(int syncId, PlayerInventory playerInventory, PlayerEntity player) {
+    public AbstractContainerMenu createMenu(int syncId, Inventory playerInventory, Player player) {
         return new OutputProbeScreenHandler(syncId, playerInventory, this);
     }
 
     @Override
-    public ProbeData getScreenOpeningData(ServerPlayerEntity player) {
+    public ProbeData getScreenOpeningData(ServerPlayer player) {
         BlockPos targetPos = getTargetPos();
         ChestConfig config = getChestConfig();
 
         return new ProbeData(
-                targetPos != null ? targetPos : BlockPos.ORIGIN,
+                targetPos != null ? targetPos : BlockPos.ZERO,
                 config
         );
     }
@@ -792,13 +747,13 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     // CLEANUP
     // ========================================
 
-    public void onRemoved(World world) {
+    public void onRemoved(Level world) {
         invalidateTargetCache();
         RoutingIndexEpoch.bump();
-        if (world instanceof ServerWorld serverWorld) {
-            ChunkKeeper.unregister(serverWorld, pos);
+        if (world instanceof ServerLevel serverWorld) {
+            ChunkKeeper.unregister(serverWorld, worldPosition);
         }
-        if (world == null || world.isClient()) return;
+        if (world == null || world.isClientSide()) return;
 
         BlockPos targetPos = getTargetPos();
 
@@ -810,7 +765,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
 
             if (be instanceof StorageControllerBlockEntity controller) {
                 // Remove this probe from controller
-                controller.removeProbe(pos);
+                controller.removeProbe(worldPosition);
 
                 // Check if we should remove the chest config
                 if (targetPos != null) {
@@ -821,7 +776,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
 
                     for (BlockPos otherProbePos : remainingProbes) {
                         // Skip if it's this probe (shouldn't happen, but safety check)
-                        if (otherProbePos.equals(pos)) {
+                        if (otherProbePos.equals(worldPosition)) {
                             continue;
                         }
 
@@ -853,22 +808,22 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
         });
         linkedBlocksCopyDirty = true;
 
-        markDirty();
+        setChanged();
 
-        if (world != null) {
-            BlockState state = world.getBlockState(pos);
-            world.updateListeners(pos, state, state, 3);
+        if (level != null) {
+            BlockState state = level.getBlockState(worldPosition);
+            level.sendBlockUpdated(worldPosition, state, state, 3);
         }
     }
 
     public void removeController(BlockPos controllerPos) {
         if (linkedBlocks.remove(controllerPos)) {
             linkedBlocksCopyDirty = true;
-            markDirty();
+            setChanged();
 
-            if (world != null) {
-                BlockState state = world.getBlockState(pos);
-                world.updateListeners(pos, state, state, 3);
+            if (level != null) {
+                BlockState state = level.getBlockState(worldPosition);
+                level.sendBlockUpdated(worldPosition, state, state, 3);
             }
             updateLinkedState();
         }
@@ -878,13 +833,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     // NBT SERIALIZATION
     // ========================================
 
-    //? if >= 1.21.8 {
-    private void writeProbeData(WriteView view) {
-        view.putBoolean("ignoreComponents", ignoreComponents);
-        view.putBoolean("useTags", useTags);
-        view.putBoolean("requireAllTags", requireAllTags);
-        view.putString("mode", mode.name());
-
+    private void writeProbeData(ValueOutput view) {
         view.putInt("linked_blocks_count", linkedBlocks.size());
         for (int i = 0; i < linkedBlocks.size(); i++) {
             view.putLong("linked_block_" + i, linkedBlocks.get(i).asLong());
@@ -910,12 +859,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     }
 
 
-    private void writeProbeData(NbtCompound nbt) {
-        nbt.putBoolean("ignoreComponents", ignoreComponents);
-        nbt.putBoolean("useTags", useTags);
-        nbt.putBoolean("requireAllTags", requireAllTags);
-        nbt.putString("mode", mode.name());
-
+    private void writeProbeData(CompoundTag nbt) {
         nbt.putInt("linked_blocks_count", linkedBlocks.size());
         for (int i = 0; i < linkedBlocks.size(); i++) {
             nbt.putLong("linked_block_" + i, linkedBlocks.get(i).asLong());
@@ -939,35 +883,25 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
         }
     }
 
-    private void readProbeData(ReadView view) {
-        ignoreComponents = view.getBoolean("ignoreComponents", true);
-        useTags = view.getBoolean("useTags", false);
-        requireAllTags = view.getBoolean("requireAllTags", false);
-
-        try {
-            mode = ProbeMode.valueOf(view.getString("mode", "FILTER"));
-        } catch (IllegalArgumentException e) {
-            mode = ProbeMode.FILTER;
-        }
-
+    private void readProbeData(ValueInput view) {
         linkedBlocks.clear();
-        int count = view.getInt("linked_blocks_count", 0);
+        int count = view.getIntOr("linked_blocks_count", 0);
         for (int i = 0; i < count; i++) {
-            view.getOptionalLong("linked_block_" + i).ifPresent(posLong -> {
-                linkedBlocks.add(BlockPos.fromLong(posLong));
+            view.getLong("linked_block_" + i).ifPresent(posLong -> {
+                linkedBlocks.add(BlockPos.of(posLong));
             });
         }
 
         // Load local chest config
-        if (view.getBoolean("has_local_config", false)) {
-            view.getOptionalLong("local_chest_pos").ifPresent(posLong -> {
-                BlockPos chestPos = BlockPos.fromLong(posLong);
-                String name = view.getString("local_chest_name", "");
-                String categoryStr = view.getString("local_chest_category", "smartsorter:all");
-                int priority = view.getInt("local_chest_priority", 1);
-                String modeStr = view.getString("local_chest_mode", "NONE");
-                boolean strictNBT = view.getBoolean("local_chest_nbt", false);
-                boolean autoFrame = view.getBoolean("local_chest_frame", false);
+        if (view.getBooleanOr("has_local_config", false)) {
+            view.getLong("local_chest_pos").ifPresent(posLong -> {
+                BlockPos chestPos = BlockPos.of(posLong);
+                String name = view.getStringOr("local_chest_name", "");
+                String categoryStr = view.getStringOr("local_chest_category", "smartsorter:all");
+                int priority = view.getIntOr("local_chest_priority", 1);
+                String modeStr = view.getStringOr("local_chest_mode", "NONE");
+                boolean strictNBT = view.getBooleanOr("local_chest_nbt", false);
+                boolean autoFrame = view.getBooleanOr("local_chest_frame", false);
 
                 Category category = CategoryManager.getInstance().getCategory(categoryStr);
                 ChestConfig.FilterMode filterMode = ChestConfig.FilterMode.valueOf(modeStr);
@@ -975,7 +909,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
                 localChestConfig = new ChestConfig(chestPos, name, category, priority, filterMode, autoFrame);
                 localChestConfig.strictNBTMatch = strictNBT;
 
-                String simplePriorityStr = view.getString("local_simple_priority", null);
+                String simplePriorityStr = view.getStringOr("local_simple_priority", null);
                 if (simplePriorityStr != null && !simplePriorityStr.isEmpty()) {
                     try {
                         localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.valueOf(simplePriorityStr);
@@ -991,114 +925,35 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     }
 
     @Override
-    public void writeData(WriteView view) {
-        super.writeData(view);
+    public void saveAdditional(ValueOutput view) {
+        super.saveAdditional(view);
         writeProbeData(view);
     }
 
     @Override
-    public void readData(ReadView view) {
-        super.readData(view);
+    public void loadAdditional(ValueInput view) {
+        super.loadAdditional(view);
         readProbeData(view);
         // Placed or chunk loaded: re-resolve the target and rebuild routing indexes.
         invalidateTargetCache();
         RoutingIndexEpoch.bump();
     }
-    //?} else {
-    /*private void writeProbeData(NbtCompound nbt) {
-        nbt.putBoolean("ignoreComponents", ignoreComponents);
-        nbt.putBoolean("useTags", useTags);
-        nbt.putBoolean("requireAllTags", requireAllTags);
-        nbt.putString("mode", mode.name());
-
-        nbt.putInt("linked_blocks_count", linkedBlocks.size());
-        for (int i = 0; i < linkedBlocks.size(); i++) {
-            nbt.putLong("linked_block_" + i, linkedBlocks.get(i).asLong());
-        }
-
-        // Save local chest config
-        if (localChestConfig != null) {
-            nbt.putBoolean("has_local_config", true);
-            nbt.putLong("local_chest_pos", localChestConfig.position.asLong());
-            nbt.putString("local_chest_name", localChestConfig.customName != null ? localChestConfig.customName : "");
-            nbt.putString("local_chest_category", localChestConfig.filterCategory.asString());
-            nbt.putInt("local_chest_priority", localChestConfig.priority);
-            nbt.putString("local_chest_mode", localChestConfig.filterMode.name());
-            nbt.putBoolean("local_chest_nbt", localChestConfig.strictNBTMatch);
-            nbt.putBoolean("local_chest_frame", localChestConfig.autoItemFrame);
-
-            // Save SimplePriority for <1.21.8
-            if (localChestConfig.simplePrioritySelection != null) {
-                nbt.putString("local_simple_priority", localChestConfig.simplePrioritySelection.name());
-            }
-        } else {
-            nbt.putBoolean("has_local_config", false);
-        }
-    }
-
-    private void readProbeData(NbtCompound nbt) {
-        ignoreComponents = nbt.getBoolean("ignoreComponents");
-        useTags = nbt.getBoolean("useTags");
-        requireAllTags = nbt.getBoolean("requireAllTags");
-
-        try {
-            mode = ProbeMode.valueOf(nbt.getString("mode"));
-        } catch (IllegalArgumentException e) {
-            mode = ProbeMode.FILTER;
-        }
-
-        linkedBlocks.clear();
-        int count = nbt.getInt("linked_blocks_count");
-        for (int i = 0; i < count; i++) {
-            String key = "linked_block_" + i;
-            if (nbt.contains(key)) {
-                linkedBlocks.add(BlockPos.fromLong(nbt.getLong(key)));
-            }
-        }
-
-        // Load local chest config
-        if (nbt.getBoolean("has_local_config")) {
-            if (nbt.contains("local_chest_pos")) {
-                BlockPos chestPos = BlockPos.fromLong(nbt.getLong("local_chest_pos"));
-                String name = nbt.getString("local_chest_name");
-                String categoryStr = nbt.getString("local_chest_category");
-                int priority = nbt.getInt("local_chest_priority");
-                String modeStr = nbt.getString("local_chest_mode");
-                boolean strictNBT = nbt.getBoolean("local_chest_nbt");
-                boolean autoFrame = nbt.getBoolean("local_chest_frame");
-
-                Category category = CategoryManager.getInstance().getCategory(categoryStr);
-                ChestConfig.FilterMode filterMode = ChestConfig.FilterMode.valueOf(modeStr);
-
-                localChestConfig = new ChestConfig(chestPos, name, category, priority, filterMode, autoFrame);
-                localChestConfig.strictNBTMatch = strictNBT;
-
-                // Load SimplePriority for <1.21.8
-                if (nbt.contains("local_simple_priority")) {
-                    try {
-                        localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.valueOf(
-                            nbt.getString("local_simple_priority")
-                        );
-                    } catch (Exception e) {
-                        localChestConfig.simplePrioritySelection = null;
-                    }
-                } else {
-                    // Keep as null if not saved (indicates manual priority)
-                    localChestConfig.simplePrioritySelection = null;
-                }
-            }
-        }
-    }
-    *///?}
 
     @Nullable
     @Override
-    public Packet<ClientPlayPacketListener> toUpdatePacket() {
-        return BlockEntityUpdateS2CPacket.create(this);
+    public Packet<ClientGamePacketListener> getUpdatePacket() {
+        return ClientboundBlockEntityDataPacket.create(this);
     }
 
     @Override
-    public NbtCompound toInitialChunkDataNbt(RegistryWrapper.WrapperLookup registryLookup) {
-        return createNbt(registryLookup);
+    public CompoundTag getUpdateTag(HolderLookup.Provider registryLookup) {
+        return saveWithoutMetadata(registryLookup);
+    }
+
+    /** Runs before the block entity is removed, for every kind of removal. */
+    @Override
+    public void preRemoveSideEffects(BlockPos pos, BlockState state) {
+        super.preRemoveSideEffects(pos, state);
+        onRemoved(level);
     }
 }

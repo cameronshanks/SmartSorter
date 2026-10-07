@@ -1,9 +1,9 @@
 package net.shaddii.smartsorter.util;
 
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 
 public enum FuelFilterMode {
     ANY_FUEL("Any Fuel"),
@@ -29,7 +29,7 @@ public enum FuelFilterMode {
             case COAL_ONLY -> isCoal(fuel);
             case BLOCKS_ONLY -> isFuelBlock(fuel);
             case NO_WOOD -> !isWood(fuel);
-            case LAVA_ONLY -> fuel.isOf(Items.LAVA_BUCKET);
+            case LAVA_ONLY -> fuel.is(Items.LAVA_BUCKET);
             case CUSTOM -> false; // Will check custom whitelist separately
         };
     }
@@ -47,7 +47,7 @@ public enum FuelFilterMode {
     }
 
     private boolean isWood(ItemStack stack) {
-        String id = Registries.ITEM.getId(stack.getItem()).getPath();
+        String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath();
         return id.contains("log") || id.contains("wood") || id.contains("plank");
     }
 

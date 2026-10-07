@@ -14,19 +14,19 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.Registry;
-import net.minecraft.registry.RegistryKey;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.Registry;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.world.ChunkTicketType;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.world.World;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.TicketType;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import net.shaddii.smartsorter.block.IntakeBlock;
 import net.shaddii.smartsorter.block.OutputProbeBlock;
 import net.shaddii.smartsorter.blockentity.IntakeBlockEntity;
@@ -69,11 +69,11 @@ public final class ChunkKeeper {
     /** Same level as /forceload (entity ticking), radius 2 = level 31. */
     private static final int TICKET_RADIUS = 2;
 
-    public static final ChunkTicketType TICKET_TYPE = new ChunkTicketType(ChunkTicketType.NO_EXPIRATION,
-            ChunkTicketType.FOR_LOADING | ChunkTicketType.FOR_SIMULATION | ChunkTicketType.RESETS_IDLE_TIMEOUT);
+    public static final TicketType TICKET_TYPE = new TicketType(TicketType.NO_TIMEOUT,
+            TicketType.FLAG_LOADING | TicketType.FLAG_SIMULATION | TicketType.FLAG_KEEP_DIMENSION_ACTIVE);
 
     private static final ConcurrentLinkedQueue<Op> PENDING = new ConcurrentLinkedQueue<>();
-    private static final Map<RegistryKey<World>, WorldKeeper> WORLDS = new HashMap<>();
+    private static final Map<ResourceKey<Level>, WorldKeeper> WORLDS = new HashMap<>();
     private static int ticketedTotal = 0;
     private static boolean capWarned = false;
 
@@ -82,7 +82,7 @@ public final class ChunkKeeper {
 
     /** Called from SmartSorter.onInitialize(). */
     public static void init() {
-        Registry.register(Registries.TICKET_TYPE, Identifier.of("smartsorter", "keep_loaded"), TICKET_TYPE);
+        Registry.register(BuiltInRegistries.TICKET_TYPE, Identifier.fromNamespaceAndPath("smartsorter", "keep_loaded"), TICKET_TYPE);
         ServerLifecycleEvents.SERVER_STARTED.register(ChunkKeeper::onServerStarted);
         ServerLifecycleEvents.SERVER_STOPPED.register(ChunkKeeper::onServerStopped);
         if (SmartSorterConfig.keepChunksLoaded) {
@@ -95,30 +95,30 @@ public final class ChunkKeeper {
     // ---- entry points (cheap; never touch tickets directly) ----
 
     /** Block entity loaded (placed or its chunk loaded). */
-    public static void onBlockEntityLoad(BlockEntity be, ServerWorld world) {
+    public static void onBlockEntityLoad(BlockEntity be, ServerLevel world) {
         if (!SmartSorterConfig.keepChunksLoaded) {
             return;
         }
         if (be instanceof StorageControllerBlockEntity) {
-            enqueue(world, be.getPos(), new long[] {ChunkPos.toLong(be.getPos())});
+            enqueue(world, be.getBlockPos(), new long[] {ChunkPos.pack(be.getBlockPos())});
         } else if (be instanceof IntakeBlockEntity) {
-            enqueue(world, be.getPos(), ownAndFacing(be.getPos(), be.getCachedState(), true));
+            enqueue(world, be.getBlockPos(), ownAndFacing(be.getBlockPos(), be.getBlockState(), true));
         } else if (be instanceof OutputProbeBlockEntity) {
-            enqueue(world, be.getPos(), ownAndFacing(be.getPos(), be.getCachedState(), false));
+            enqueue(world, be.getBlockPos(), ownAndFacing(be.getBlockPos(), be.getBlockState(), false));
         }
     }
 
     /** A probe found its chest needs another chunk (target in a neighbor chunk, double chest's other half). */
-    public static void requestExtraChunk(ServerWorld world, BlockPos owner, BlockPos chunkOf) {
-        enqueue(world, owner, new long[] {ChunkPos.toLong(chunkOf)});
+    public static void requestExtraChunk(ServerLevel world, BlockPos owner, BlockPos chunkOf) {
+        enqueue(world, owner, new long[] {ChunkPos.pack(chunkOf)});
     }
 
     /** Block removed: release everything it held. Always safe to call. */
-    public static void unregister(ServerWorld world, BlockPos owner) {
+    public static void unregister(ServerLevel world, BlockPos owner) {
         if (!SmartSorterConfig.keepChunksLoaded) {
             return;
         }
-        PENDING.add(new Op(world.getRegistryKey(), owner.asLong(), null));
+        PENDING.add(new Op(world.dimension(), owner.asLong(), null));
     }
 
     /**
@@ -126,40 +126,40 @@ public final class ChunkKeeper {
      * block is removed), so a chunk reload re-registering "own + facing" never
      * drops a double-chest half the probe added later.
      */
-    private static void enqueue(ServerWorld world, BlockPos owner, long[] chunks) {
-        PENDING.add(new Op(world.getRegistryKey(), owner.asLong(), chunks));
+    private static void enqueue(ServerLevel world, BlockPos owner, long[] chunks) {
+        PENDING.add(new Op(world.dimension(), owner.asLong(), chunks));
     }
 
     private static long[] ownAndFacing(BlockPos pos, BlockState state, boolean intake) {
-        long own = ChunkPos.toLong(pos);
+        long own = ChunkPos.pack(pos);
         Direction facing = null;
-        if (intake && state.contains(IntakeBlock.FACING)) {
-            facing = state.get(IntakeBlock.FACING);
-        } else if (!intake && state.contains(OutputProbeBlock.FACING)) {
-            facing = state.get(OutputProbeBlock.FACING);
+        if (intake && state.hasProperty(IntakeBlock.FACING)) {
+            facing = state.getValue(IntakeBlock.FACING);
+        } else if (!intake && state.hasProperty(OutputProbeBlock.FACING)) {
+            facing = state.getValue(OutputProbeBlock.FACING);
         }
         if (facing == null) {
             return new long[] {own};
         }
-        long other = ChunkPos.toLong(pos.offset(facing));
+        long other = ChunkPos.pack(pos.relative(facing));
         return other == own ? new long[] {own} : new long[] {own, other};
     }
 
     // ---- server lifecycle ----
 
     public static void onServerStarted(MinecraftServer server) {
-        for (ServerWorld world : server.getWorlds()) {
+        for (ServerLevel world : server.getAllLevels()) {
             if (!SmartSorterConfig.keepChunksLoaded) {
                 // Option off: forget anything saved while it was on (get(), not
                 // getOrCreate(), so no empty file is written for every world).
-                KeepLoadedState saved = world.getPersistentStateManager().get(KeepLoadedState.TYPE);
+                KeepLoadedState saved = world.getDataStorage().get(KeepLoadedState.TYPE);
                 if (saved != null && !saved.owners.isEmpty()) {
                     saved.owners.clear();
-                    saved.markDirty();
+                    saved.setDirty();
                 }
                 continue;
             }
-            KeepLoadedState state = world.getPersistentStateManager().getOrCreate(KeepLoadedState.TYPE);
+            KeepLoadedState state = world.getDataStorage().computeIfAbsent(KeepLoadedState.TYPE);
             WorldKeeper keeper = keeper(world);
             for (Long2ObjectMap.Entry<long[]> entry : state.owners.long2ObjectEntrySet()) {
                 keeper.owners.put(entry.getLongKey(), entry.getValue());
@@ -169,7 +169,7 @@ public final class ChunkKeeper {
             }
             if (!state.owners.isEmpty()) {
                 LOGGER.info("[Smart Sorter] Restored {} kept-loaded chunk(s) for {} block(s) in {}",
-                        keeper.refs.size(), state.owners.size(), world.getRegistryKey().getValue());
+                        keeper.refs.size(), state.owners.size(), world.dimension().identifier());
             }
         }
     }
@@ -188,16 +188,16 @@ public final class ChunkKeeper {
         }
         Op op;
         while ((op = PENDING.poll()) != null) {
-            ServerWorld world = server.getWorld(op.world);
+            ServerLevel world = server.getLevel(op.world);
             if (world != null) {
                 apply(world, op);
             }
         }
     }
 
-    private static void apply(ServerWorld world, Op op) {
+    private static void apply(ServerLevel world, Op op) {
         WorldKeeper keeper = keeper(world);
-        KeepLoadedState state = world.getPersistentStateManager().getOrCreate(KeepLoadedState.TYPE);
+        KeepLoadedState state = world.getDataStorage().computeIfAbsent(KeepLoadedState.TYPE);
         long[] old = keeper.owners.get(op.owner);
 
         long[] updated;
@@ -229,7 +229,7 @@ public final class ChunkKeeper {
                 keeper.release(world, chunk);
             }
         }
-        state.markDirty();
+        state.setDirty();
     }
 
     private static long[] union(long[] a, long[] b) {
@@ -256,12 +256,12 @@ public final class ChunkKeeper {
         return true;
     }
 
-    private static WorldKeeper keeper(ServerWorld world) {
-        return WORLDS.computeIfAbsent(world.getRegistryKey(), key -> new WorldKeeper());
+    private static WorldKeeper keeper(ServerLevel world) {
+        return WORLDS.computeIfAbsent(world.dimension(), key -> new WorldKeeper());
     }
 
     /** chunks == null means unregister. */
-    private record Op(RegistryKey<World> world, long owner, long[] chunks) {
+    private record Op(ResourceKey<Level> world, long owner, long[] chunks) {
     }
 
     private static final class WorldKeeper {
@@ -269,7 +269,7 @@ public final class ChunkKeeper {
         final Long2IntOpenHashMap refs = new Long2IntOpenHashMap();
         final LongOpenHashSet ticketed = new LongOpenHashSet();
 
-        void retain(ServerWorld world, long chunk) {
+        void retain(ServerLevel world, long chunk) {
             int count = this.refs.addTo(chunk, 1);
             if (count != 0) {
                 return; // already counted (and ticketed, unless it was over the cap)
@@ -278,23 +278,23 @@ public final class ChunkKeeper {
                 if (!capWarned) {
                     capWarned = true;
                     LOGGER.warn("[Smart Sorter] maxForcedChunks ({}) reached; chunk {} in {} and any further chunks will not be kept loaded",
-                            SmartSorterConfig.maxForcedChunks, new ChunkPos(chunk), world.getRegistryKey().getValue());
+                            SmartSorterConfig.maxForcedChunks, ChunkPos.unpack(chunk), world.dimension().identifier());
                 }
                 return;
             }
-            world.getChunkManager().addTicket(TICKET_TYPE, new ChunkPos(chunk), TICKET_RADIUS);
+            world.getChunkSource().addTicketWithRadius(TICKET_TYPE, ChunkPos.unpack(chunk), TICKET_RADIUS);
             this.ticketed.add(chunk);
             ticketedTotal++;
         }
 
-        void release(ServerWorld world, long chunk) {
+        void release(ServerLevel world, long chunk) {
             int count = this.refs.addTo(chunk, -1);
             if (count > 1) {
                 return;
             }
             this.refs.remove(chunk);
             if (this.ticketed.remove(chunk)) {
-                world.getChunkManager().removeTicket(TICKET_TYPE, new ChunkPos(chunk), TICKET_RADIUS);
+                world.getChunkSource().removeTicketWithRadius(TICKET_TYPE, ChunkPos.unpack(chunk), TICKET_RADIUS);
                 ticketedTotal--;
                 if (ticketedTotal < SmartSorterConfig.maxForcedChunks) {
                     capWarned = false;

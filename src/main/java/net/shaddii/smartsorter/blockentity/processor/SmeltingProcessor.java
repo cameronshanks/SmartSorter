@@ -1,12 +1,12 @@
 package net.shaddii.smartsorter.blockentity.processor;
 
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
-import net.minecraft.block.entity.AbstractFurnaceBlockEntity;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.recipe.RecipeType;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 import net.shaddii.smartsorter.util.ProcessProbeConfig;
 
@@ -34,7 +34,7 @@ public class SmeltingProcessor {
     /**
      * Main processing method for all smelting machines (furnace, blast furnace, smoker).
      */
-    public void processSmeltingMachine(ServerWorld world, BlockPos probePos,
+    public void processSmeltingMachine(ServerLevel world, BlockPos probePos,
                                        AbstractFurnaceBlockEntity machine,
                                        StorageControllerBlockEntity controller,
                                        ProcessProbeConfig config) {
@@ -66,13 +66,13 @@ public class SmeltingProcessor {
     /**
      * Extracts outputs from smelting machine to network.
      */
-    private boolean extractOutputs(ServerWorld world, BlockPos probePos,
-                                   Inventory inventory,
+    private boolean extractOutputs(ServerLevel world, BlockPos probePos,
+                                   Container inventory,
                                    StorageControllerBlockEntity controller) {
         boolean allExtracted = true;
         int outputSlot = 2; // Standard output slot for all vanilla smelting machines
 
-        ItemStack output = inventory.getStack(outputSlot);
+        ItemStack output = inventory.getItem(outputSlot);
         if (!output.isEmpty()) {
             ItemStack toInsert = output.copy();
             ItemStack remaining = controller.insertItem(toInsert).remainder();
@@ -86,8 +86,8 @@ public class SmeltingProcessor {
                     }
                 }
 
-                inventory.setStack(outputSlot, ItemStack.EMPTY);
-                inventory.markDirty();
+                inventory.setItem(outputSlot, ItemStack.EMPTY);
+                inventory.setChanged();
                 itemsProcessed += toInsert.getCount();
 
                 // Sync stats
@@ -103,7 +103,7 @@ public class SmeltingProcessor {
     /**
      * Supplies input items to smelting machine.
      */
-    private void supplyInput(ServerWorld world, AbstractFurnaceBlockEntity machine,
+    private void supplyInput(ServerLevel world, AbstractFurnaceBlockEntity machine,
                              StorageControllerBlockEntity controller,
                              Map<ItemVariant, Long> networkItems,
                              SmeltingNeeds needs, RecipeType<?> recipeType,
@@ -127,13 +127,13 @@ public class SmeltingProcessor {
             ItemStack extracted = controller.extractItem(variant, amount);
 
             if (!extracted.isEmpty()) {
-                ItemStack existing = machine.getStack(0);
+                ItemStack existing = machine.getItem(0);
                 if (existing.isEmpty()) {
-                    machine.setStack(0, extracted);
+                    machine.setItem(0, extracted);
                 } else {
-                    existing.increment(extracted.getCount());
+                    existing.grow(extracted.getCount());
                 }
-                machine.markDirty();
+                machine.setChanged();
                 break;
             }
         }
@@ -142,7 +142,7 @@ public class SmeltingProcessor {
     /**
      * Supplies fuel to smelting machine.
      */
-    private void supplyFuel(ServerWorld world, AbstractFurnaceBlockEntity machine,
+    private void supplyFuel(ServerLevel world, AbstractFurnaceBlockEntity machine,
                             StorageControllerBlockEntity controller,
                             Map<ItemVariant, Long> networkItems,
                             SmeltingNeeds needs, ProcessProbeConfig config) {
@@ -165,13 +165,13 @@ public class SmeltingProcessor {
             ItemStack extracted = controller.extractItem(variant, amount);
 
             if (!extracted.isEmpty()) {
-                ItemStack existing = machine.getStack(1);
+                ItemStack existing = machine.getItem(1);
                 if (existing.isEmpty()) {
-                    machine.setStack(1, extracted);
+                    machine.setItem(1, extracted);
                 } else {
-                    existing.increment(extracted.getCount());
+                    existing.grow(extracted.getCount());
                 }
-                machine.markDirty();
+                machine.setChanged();
                 break;
             }
         }
@@ -184,29 +184,29 @@ public class SmeltingProcessor {
         SmeltingNeeds needs = new SmeltingNeeds();
 
         // Check input slot (slot 0)
-        ItemStack input = machine.getStack(0);
+        ItemStack input = machine.getItem(0);
         if (input.isEmpty()) {
             needs.needsInput = true;
             needs.inputSpace = MAX_INPUT_PER_INSERT;
-        } else if (input.getCount() < input.getMaxCount()) {
+        } else if (input.getCount() < input.getMaxStackSize()) {
             needs.needsInput = true;
             needs.currentInput = input;
             needs.inputSpace = Math.min(
-                    input.getMaxCount() - input.getCount(),
+                    input.getMaxStackSize() - input.getCount(),
                     MAX_INPUT_PER_INSERT
             );
         }
 
         // Check fuel slot (slot 1)
-        ItemStack fuel = machine.getStack(1);
+        ItemStack fuel = machine.getItem(1);
         if (fuel.isEmpty()) {
             needs.needsFuel = true;
             needs.fuelSpace = MAX_FUEL_PER_INSERT;
-        } else if (fuel.getCount() < fuel.getMaxCount()) {
+        } else if (fuel.getCount() < fuel.getMaxStackSize()) {
             needs.needsFuel = true;
             needs.currentFuel = fuel;
             needs.fuelSpace = Math.min(
-                    fuel.getMaxCount() - fuel.getCount(),
+                    fuel.getMaxStackSize() - fuel.getCount(),
                     MAX_FUEL_PER_INSERT
             );
         }

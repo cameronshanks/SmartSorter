@@ -100,7 +100,7 @@ public class ItemCacheManager {
         List<Map.Entry<ItemVariant, Long>> result = new ArrayList<>(list.size());
 
         for (var entry : list) {
-            String itemName = entry.getKey().getItem().getName().getString().toLowerCase();
+            String itemName = entry.getKey().getItem().components().getOrDefault(net.minecraft.core.component.DataComponents.ITEM_NAME, net.minecraft.network.chat.CommonComponents.EMPTY).getString().toLowerCase();
             if (itemName.contains(lowerSearch)) {
                 result.add(entry);
             }
@@ -112,8 +112,8 @@ public class ItemCacheManager {
     private void sortList(List<Map.Entry<ItemVariant, Long>> list, SortMode sortMode) {
         switch (sortMode) {
             case NAME -> list.sort((a, b) -> {
-                String nameA = a.getKey().getItem().getName().getString();
-                String nameB = b.getKey().getItem().getName().getString();
+                String nameA = a.getKey().getItem().components().getOrDefault(net.minecraft.core.component.DataComponents.ITEM_NAME, net.minecraft.network.chat.CommonComponents.EMPTY).getString();
+                String nameB = b.getKey().getItem().components().getOrDefault(net.minecraft.core.component.DataComponents.ITEM_NAME, net.minecraft.network.chat.CommonComponents.EMPTY).getString();
                 return nameA.compareTo(nameB);
             });
             case COUNT -> list.sort((a, b) -> Long.compare(b.getValue(), a.getValue()));

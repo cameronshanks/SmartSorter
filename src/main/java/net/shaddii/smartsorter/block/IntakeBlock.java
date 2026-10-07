@@ -1,27 +1,32 @@
 package net.shaddii.smartsorter.block;
 
 import com.mojang.serialization.MapCodec;
-import net.minecraft.block.*;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.block.entity.BlockEntityTicker;
-import net.minecraft.block.entity.BlockEntityType;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.ItemPlacementContext;
-import net.minecraft.item.ItemStack;
-import net.minecraft.state.StateManager;
-import net.minecraft.state.property.EnumProperty;
-import net.minecraft.state.property.Properties;
-import net.minecraft.text.Text;
-import net.minecraft.util.ActionResult;
-import net.minecraft.util.ItemScatterer;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.shape.VoxelShape;
-import net.minecraft.util.shape.VoxelShapes;
-import net.minecraft.world.BlockRenderView;
-import net.minecraft.world.BlockView;
-import net.minecraft.world.World;
+import net.minecraft.world.level.block.*;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.Containers;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.BaseEntityBlock;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.RenderShape;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityTicker;
+import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.StateDefinition;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.EnumProperty;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.Shapes;
+import net.minecraft.world.phys.shapes.VoxelShape;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.blockentity.IntakeBlockEntity;
 import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
@@ -33,21 +38,21 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
 
-public class IntakeBlock extends BlockWithEntity {
+public class IntakeBlock extends BaseEntityBlock {
     // ========================================
     // CONSTANTS
     // ========================================
 
-    public static final EnumProperty<Direction> FACING = Properties.FACING;
-    public static final MapCodec<IntakeBlock> CODEC = createCodec(IntakeBlock::new);
+    public static final EnumProperty<Direction> FACING = BlockStateProperties.FACING;
+    public static final MapCodec<IntakeBlock> CODEC = simpleCodec(IntakeBlock::new);
 
     // ========================================
     // CONSTRUCTOR
     // ========================================
 
-    public IntakeBlock(AbstractBlock.Settings settings) {
+    public IntakeBlock(BlockBehaviour.Properties settings) {
         super(settings);
-        this.setDefaultState(this.getStateManager().getDefaultState().with(FACING, Direction.NORTH));
+        this.registerDefaultState(this.getStateDefinition().any().setValue(FACING, Direction.NORTH));
     }
 
     // ========================================
@@ -55,20 +60,20 @@ public class IntakeBlock extends BlockWithEntity {
     // ========================================
 
     @Override
-    protected MapCodec<? extends BlockWithEntity> getCodec() {
+    protected MapCodec<? extends BaseEntityBlock> codec() {
         return CODEC;
     }
 
     @Override
-    protected void appendProperties(StateManager.Builder<Block, BlockState> builder) {
-        super.appendProperties(builder);
+    protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
+        super.createBlockStateDefinition(builder);
         builder.add(FACING);
     }
 
     @Override
-    public BlockState getPlacementState(ItemPlacementContext ctx) {
-        Direction playerFacing = ctx.getPlayerLookDirection();
-        return this.getDefaultState().with(FACING, playerFacing);
+    public BlockState getStateForPlacement(BlockPlaceContext ctx) {
+        Direction playerFacing = ctx.getNearestLookingDirection();
+        return this.defaultBlockState().setValue(FACING, playerFacing);
     }
 
     // ========================================
@@ -76,13 +81,13 @@ public class IntakeBlock extends BlockWithEntity {
     // ========================================
 
     @Override
-    public BlockEntity createBlockEntity(BlockPos pos, BlockState state) {
+    public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
         return new IntakeBlockEntity(pos, state);
     }
 
     @Override
-    public <T extends BlockEntity> BlockEntityTicker<T> getTicker(World world, BlockState state, BlockEntityType<T> type) {
-        if (world.isClient()) return null;
+    public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level world, BlockState state, BlockEntityType<T> type) {
+        if (world.isClientSide()) return null;
         return type == SmartSorter.INTAKE_BE_TYPE
                 ? (world1, pos, state1, be) -> IntakeBlockEntity.tick(world1, pos, state1, (IntakeBlockEntity) be)
                 : null;
@@ -93,40 +98,40 @@ public class IntakeBlock extends BlockWithEntity {
     // ========================================
 
     @Override
-    protected ActionResult onUse(BlockState state, World world, BlockPos pos, PlayerEntity player, BlockHitResult hit) {
-        if (world.isClient()) return ActionResult.SUCCESS;
+    protected InteractionResult useWithoutItem(BlockState state, Level world, BlockPos pos, Player player, BlockHitResult hit) {
+        if (world.isClientSide()) return InteractionResult.SUCCESS;
 
         BlockEntity blockEntity = world.getBlockEntity(pos);
         if (!(blockEntity instanceof IntakeBlockEntity intake)) {
-            return ActionResult.PASS;
+            return InteractionResult.PASS;
         }
 
-        ItemStack heldStack = player.getMainHandStack();
+        ItemStack heldStack = player.getMainHandItem();
 
-        if (player.isSneaking() && !heldStack.isEmpty()) return ActionResult.PASS;
-        if (!heldStack.isEmpty() && heldStack.getItem() instanceof LinkingToolItem) return ActionResult.PASS;
+        if (player.isShiftKeyDown() && !heldStack.isEmpty()) return InteractionResult.PASS;
+        if (!heldStack.isEmpty() && heldStack.getItem() instanceof LinkingToolItem) return InteractionResult.PASS;
 
         IntakeBuffer buffer = intake.getIntakeBuffer();
 
         // Sneak + empty hand with something buffered: hand it all back to the player.
-        if (player.isSneaking() && heldStack.isEmpty() && !buffer.isEmpty()) {
+        if (player.isShiftKeyDown() && heldStack.isEmpty() && !buffer.isEmpty()) {
             int total = buffer.totalCount();
             List<ItemStack> stacks = buffer.drain();
             for (ItemStack stack : stacks) {
-                player.getInventory().offerOrDrop(stack);
+                player.getInventory().placeItemBackInInventory(stack);
             }
-            intake.markDirty();
-            player.sendMessage(Text.literal("§7Intake: §aCleared buffer §7(" + stacks.size() + " stacks, " + total + " items returned)"), true);
-            return ActionResult.SUCCESS;
+            intake.setChanged();
+            player.sendOverlayMessage(Component.literal("§7Intake: §aCleared buffer §7(" + stacks.size() + " stacks, " + total + " items returned)"));
+            return InteractionResult.SUCCESS;
         }
 
-        player.sendMessage(Text.literal(statusText(state, world, intake, buffer)), true);
-        return ActionResult.SUCCESS;
+        player.sendOverlayMessage(Component.literal(statusText(state, world, intake, buffer)));
+        return InteractionResult.SUCCESS;
     }
 
     /** Action-bar status: facing, buffer contents, link mode, and any stuck items. */
-    private static String statusText(BlockState state, World world, IntakeBlockEntity intake, IntakeBuffer buffer) {
-        String facing = state.get(FACING).asString();
+    private static String statusText(BlockState state, Level world, IntakeBlockEntity intake, IntakeBuffer buffer) {
+        String facing = state.getValue(FACING).getSerializedName();
 
         String bufferText;
         List<IntakeBuffer.Entry> entries = buffer.entries();
@@ -134,7 +139,7 @@ public class IntakeBlock extends BlockWithEntity {
             bufferText = "§8Empty";
         } else if (entries.size() == 1) {
             ItemStack stack = entries.get(0).stack;
-            bufferText = "§e" + stack.getCount() + "x §f" + stack.getName().getString();
+            bufferText = "§e" + stack.getCount() + "x §f" + stack.getHoverName().getString();
         } else {
             bufferText = "§e" + entries.size() + " stacks §7(" + buffer.totalCount() + " items)";
         }
@@ -143,7 +148,7 @@ public class IntakeBlock extends BlockWithEntity {
         String modeText;
         if (intake.isInManagedMode()) {
             BlockPos controllerPos = intake.getController();
-            if (world.isChunkLoaded(controllerPos)
+            if (world.hasChunkAt(controllerPos)
                     && world.getBlockEntity(controllerPos) instanceof StorageControllerBlockEntity controller) {
                 int probeCount = controller.getLinkedProbes().size();
                 if (probeCount == 0) {
@@ -174,7 +179,7 @@ public class IntakeBlock extends BlockWithEntity {
                     break;
                 }
                 if (shown > 0) names.append(", ");
-                names.append(entry.stack.getName().getString());
+                names.append(entry.stack.getHoverName().getString());
                 shown++;
             }
             text += " §7| §c⚠ Stuck: " + stuckTypes + " type" + (stuckTypes == 1 ? "" : "s")
@@ -188,84 +193,15 @@ public class IntakeBlock extends BlockWithEntity {
     // ========================================
 
     @Override
-    public BlockRenderType getRenderType(BlockState state) {
-        return BlockRenderType.MODEL;
+    public RenderShape getRenderShape(BlockState state) {
+        return RenderShape.MODEL;
     }
 
     // ========================================
     // CLEANUP
     // ========================================
 
-    //? if >=1.21.8 {
-    @Override
-    protected void onStateReplaced(BlockState state, net.minecraft.server.world.ServerWorld world, BlockPos pos, boolean moved) {
-        if (!moved) {
-            BlockEntity blockEntity = world.getBlockEntity(pos);
-
-            // Scatter buffered items
-            if (blockEntity instanceof IntakeBlockEntity intake) {
-                for (ItemStack stack : intake.getIntakeBuffer().drain()) {
-                    ItemScatterer.spawn(world, pos.getX(), pos.getY(), pos.getZ(), stack);
-                }
-            }
-            ChunkKeeper.unregister(world, pos);
-
-            // Unlink from controller
-            if (blockEntity instanceof IntakeBlockEntity intake) {
-                BlockPos controllerPos = intake.getController();
-                if (controllerPos != null) {
-                    BlockEntity controllerBE = world.getBlockEntity(controllerPos);
-                    if (controllerBE instanceof StorageControllerBlockEntity controller) {
-                        controller.removeIntake(pos);
-                    }
-                }
-
-                // Unlink from probes (direct mode)
-                for (BlockPos probePos : new java.util.ArrayList<>(intake.getOutputs())) {
-                    BlockEntity probeBE = world.getBlockEntity(probePos);
-                    if (probeBE instanceof OutputProbeBlockEntity probe) {
-                        probe.removeLinkedBlock(pos);
-                    }
-                }
-            }
-        }
-
-        super.onStateReplaced(state, world, pos, moved);
-    }
-    //?} else {
-    /*@Override
-    protected void onStateReplaced(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
-        if (!state.isOf(newState.getBlock())) {
-            BlockEntity blockEntity = world.getBlockEntity(pos);
-
-            // Scatter buffered items
-            if (blockEntity instanceof IntakeBlockEntity intake && !intake.getBuffer().isEmpty()) {
-                ItemScatterer.spawn(world, pos.getX(), pos.getY(), pos.getZ(), intake.getBuffer());
-            }
-
-            // Unlink from controller
-            if (!world.isClient() && blockEntity instanceof IntakeBlockEntity intake) {
-                BlockPos controllerPos = intake.getController();
-                if (controllerPos != null) {
-                    BlockEntity controllerBE = world.getBlockEntity(controllerPos);
-                    if (controllerBE instanceof StorageControllerBlockEntity controller) {
-                        controller.removeIntake(pos);
-                    }
-                }
-
-                // Unlink from probes (direct mode)
-                for (BlockPos probePos : new java.util.ArrayList<>(intake.getOutputs())) {
-                    BlockEntity probeBE = world.getBlockEntity(probePos);
-                    if (probeBE instanceof OutputProbeBlockEntity probe) {
-                        probe.removeLinkedBlock(pos);
-                    }
-                }
-            }
-        }
-
-        super.onStateReplaced(state, world, pos, newState, moved);
-    }
-    *///?}
+    // Dropping the buffer and unlinking run in IntakeBlockEntity.preRemoveSideEffects.
 
     // ========================================
     // COMPATIBILITY
@@ -273,9 +209,9 @@ public class IntakeBlock extends BlockWithEntity {
 
 
     @Override
-    public VoxelShape getOutlineShape(BlockState state, BlockView world, BlockPos pos, ShapeContext context) {
+    public VoxelShape getShape(BlockState state, BlockGetter world, BlockPos pos, CollisionContext context) {
         // Define the actual shape of your block for proper culling
         // This example uses full cube, adjust if your blocks are smaller
-        return VoxelShapes.fullCube();
+        return Shapes.block();
     }
 }

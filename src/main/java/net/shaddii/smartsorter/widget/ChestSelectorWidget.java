@@ -1,19 +1,16 @@
 package net.shaddii.smartsorter.widget;
 
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.client.gui.screen.Screen;
-//? if >=1.21.9 {
-import net.minecraft.client.input.KeyInput;
-import net.minecraft.client.input.CharInput;
-import net.minecraft.client.gui.Click;
-import net.minecraft.client.input.MouseInput;
-//?}
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.input.CharacterEvent;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.input.MouseButtonInfo;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.shaddii.smartsorter.network.ChestConfigUpdatePayload;
 import net.shaddii.smartsorter.screen.StorageControllerScreen;
 import net.shaddii.smartsorter.util.ChestConfig;
@@ -27,7 +24,7 @@ import java.util.function.Consumer;
 
 public class ChestSelectorWidget {
     private final int x, y, width, height;
-    private final TextRenderer textRenderer;
+    private final Font textRenderer;
     List<ChestConfig> chests = new ArrayList<>();
 
     private int selectedIndex = -1;
@@ -38,13 +35,13 @@ public class ChestSelectorWidget {
     private ChestSortMode currentSortMode = ChestSortMode.PRIORITY;
     private Map<BlockPos, ChestConfig> chestConfigs = new HashMap<>();
 
-    private ButtonWidget editButton;
-    private ButtonWidget sortButton;
-    private TextFieldWidget renameField;
+    private Button editButton;
+    private Button sortButton;
+    private EditBox renameField;
     private boolean isRenaming = false;
     private final StorageControllerScreen parentScreen;
 
-    public ChestSelectorWidget(int x, int y, int width, int height, TextRenderer textRenderer, StorageControllerScreen parentScreen) {
+    public ChestSelectorWidget(int x, int y, int width, int height, Font textRenderer, StorageControllerScreen parentScreen) {
         this.x = x;
         this.y = y;
         this.width = width;
@@ -53,25 +50,25 @@ public class ChestSelectorWidget {
         this.parentScreen = parentScreen;
 
         int dropdownWidth = width - 25;  // Keep full width minus space for buttons
-        this.dropdown = new DropdownWidget(x, y, dropdownWidth, height, Text.literal("Select Chest"));
+        this.dropdown = new DropdownWidget(x, y, dropdownWidth, height, Component.literal("Select Chest"));
 
         // Sort button
-        this.sortButton = ButtonWidget.builder(
-                Text.literal("📤"),
+        this.sortButton = Button.builder(
+                Component.literal("📤"),
                 btn -> triggerSort()
-        ).dimensions(x + dropdownWidth + 2, y - 14, 20, 10).build();
+        ).bounds(x + dropdownWidth + 2, y - 14, 20, 10).build();
 
         // Edit/Rename button - below sort button
-        this.editButton = ButtonWidget.builder(
-                Text.literal("✏"),
+        this.editButton = Button.builder(
+                Component.literal("✏"),
                 btn -> startRenaming()
-        ).dimensions(x + dropdownWidth + 2, y, 20, height).build();
+        ).bounds(x + dropdownWidth + 2, y, 20, height).build();
 
 
-        this.renameField = new TextFieldWidget(textRenderer, x, y, dropdownWidth, height, Text.literal(""));
+        this.renameField = new EditBox(textRenderer, x, y, dropdownWidth, height, Component.literal(""));
         renameField.setMaxLength(32);
         renameField.setVisible(false);
-        renameField.setDrawsBackground(true);
+        renameField.setBordered(true);
     }
 
     public void reselectChestByPos(BlockPos posToSelect) {
@@ -269,7 +266,7 @@ public class ChestSelectorWidget {
         isRenaming = true;
         ChestConfig config = chests.get(selectedIndex);
 
-        renameField.setText(config.customName != null && !config.customName.isEmpty() ? config.customName : "");
+        renameField.setValue(config.customName != null && !config.customName.isEmpty() ? config.customName : "");
         renameField.setVisible(true);
         renameField.setFocused(true);
         dropdown.visible = false;
@@ -279,7 +276,7 @@ public class ChestSelectorWidget {
         if (!isRenaming) return;
 
         isRenaming = false;
-        String newName = renameField.getText().trim();
+        String newName = renameField.getValue().trim();
         ChestConfig config = chests.get(selectedIndex);
 
         config.customName = newName.isEmpty() ? "" : newName;
@@ -316,22 +313,22 @@ public class ChestSelectorWidget {
         }
     }
 
-    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
         // Only show sort button if selected chest is NOT custom mode
         ChestConfig selected = getSelectedChest();
         if (selected != null && selected.filterMode != ChestConfig.FilterMode.CUSTOM) {
-            sortButton.render(context, mouseX, mouseY, delta);
+            sortButton.extractRenderState(context, mouseX, mouseY, delta);
         }
 
         if (isRenaming) {
-            renameField.render(context, mouseX, mouseY, delta);
+            renameField.extractRenderState(context, mouseX, mouseY, delta);
         } else {
-            dropdown.render(context, mouseX, mouseY, delta);
+            dropdown.extractRenderState(context, mouseX, mouseY, delta);
         }
-        editButton.render(context, mouseX, mouseY, delta);
+        editButton.extractRenderState(context, mouseX, mouseY, delta);
     }
 
-    public void renderDropdownIfOpen(DrawContext context, int mouseX, int mouseY) {
+    public void renderDropdownIfOpen(GuiGraphicsExtractor context, int mouseX, int mouseY) {
         if (dropdown.isOpen()) {
             dropdown.renderDropdown(context, mouseX, mouseY);
 
@@ -349,10 +346,9 @@ public class ChestSelectorWidget {
         }
     }
 
-    //? if >=1.21.9 {
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        MouseInput mouseInput = new MouseInput(button, 0);
-        Click click = new Click(mouseX, mouseY, mouseInput);
+        MouseButtonInfo mouseInput = new MouseButtonInfo(button, 0);
+        MouseButtonEvent click = new MouseButtonEvent(mouseX, mouseY, mouseInput);
 
         // Only handle sort button if chest is not CUSTOM mode
         ChestConfig selected = getSelectedChest();
@@ -382,116 +378,40 @@ public class ChestSelectorWidget {
 
         return false;
     }
-    //?} else {
-/*public boolean mouseClicked(double mouseX, double mouseY, int button) {
-    ChestConfig selected = getSelectedChest();
-    if (selected != null && selected.filterMode != ChestConfig.FilterMode.CUSTOM) {
-        int sbX = sortButton.getX();
-        int sbY = sortButton.getY();
-        int sbW = sortButton.getWidth();
-        int sbH = sortButton.getHeight();
-
-        if (mouseX >= sbX && mouseX < sbX + sbW && mouseY >= sbY && mouseY < sbH) {
-            sortButton.onPress();
-            return true;
-        }
-    }
-
-    if (isRenaming) {
-        int fx = renameField.getX();
-        int fy = renameField.getY();
-        int fw = renameField.getWidth();
-        int fh = renameField.getHeight();
-
-        if (mouseX >= fx && mouseX < fx + fw && mouseY >= fy && mouseY < fy + fh) {
-            renameField.setFocused(true);
-            renameField.onClick(mouseX, mouseY);
-            return true;
-        }
-        finishRenaming();
-        return true;
-    }
-
-    int bx = editButton.getX();
-    int by = editButton.getY();
-    int bw = editButton.getWidth();
-    int bh = editButton.getHeight();
-
-    if (mouseX >= bx && mouseX < bx + bw && mouseY >= by && mouseY < by + bh) {
-        editButton.onPress();
-        return true;
-    }
-
-    if (dropdown.mouseClicked(mouseX, mouseY, button)) {
-        selectedIndex = dropdown.getSelectedIndex();
-        notifySelectionChange();
-        return true;
-    }
-
-    return false;
-}
-*///?}
 
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
         return dropdown.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
     }
 
-    //? if >=1.21.9 {
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (isRenaming) {
-            KeyInput input = new KeyInput(keyCode, scanCode, modifiers);
+            KeyEvent input = new KeyEvent(keyCode, scanCode, modifiers);
 
             if (keyCode == 257 || keyCode == 335) { // Enter
                 finishRenaming();
                 return true;
             }
             if (keyCode == 256) { // Escape
-                renameField.setText("");
+                renameField.setValue("");
                 finishRenaming();
                 return true;
             }
             return renameField.keyPressed(input);
         }
 
-        KeyInput input = new KeyInput(keyCode, scanCode, modifiers);
+        KeyEvent input = new KeyEvent(keyCode, scanCode, modifiers);
         return dropdown.keyPressed(input);
     }
 
     public boolean charTyped(char chr, int modifiers) {
         if (isRenaming) {
-            CharInput input = new CharInput(chr, modifiers);
+            CharacterEvent input = new CharacterEvent(chr);
             return renameField.charTyped(input);
         }
 
-        CharInput input = new CharInput(chr, modifiers);
+        CharacterEvent input = new CharacterEvent(chr);
         return dropdown.charTyped(input);
     }
-    //?} else {
-    /*public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (isRenaming) {
-            if (keyCode == 257 || keyCode == 335) { // Enter
-                finishRenaming();
-                return true;
-            }
-            if (keyCode == 256) { // Escape
-                renameField.setText("");
-                finishRenaming();
-                return true;
-            }
-            return renameField.keyPressed(keyCode, scanCode, modifiers);
-        }
-
-        return dropdown.keyPressed(keyCode, scanCode, modifiers);
-    }
-
-    public boolean charTyped(char chr, int modifiers) {
-        if (isRenaming) {
-            return renameField.charTyped(chr, modifiers);
-        }
-
-        return dropdown.charTyped(chr, modifiers);
-    }
-    *///?}
 
     public boolean isDropdownOpen() {
         return dropdown.isOpen();

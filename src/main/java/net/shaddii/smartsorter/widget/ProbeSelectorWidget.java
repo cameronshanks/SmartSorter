@@ -1,18 +1,16 @@
 package net.shaddii.smartsorter.widget;
 
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.TextFieldWidget;
-//? if >=1.21.9 {
-import net.minecraft.client.gui.Click;
-import net.minecraft.client.input.CharInput;
-import net.minecraft.client.input.KeyInput;
-import net.minecraft.client.input.MouseInput;
-//?}
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.input.CharacterEvent;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.input.MouseButtonInfo;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.shaddii.smartsorter.network.ProbeConfigUpdatePayload;
 import net.shaddii.smartsorter.util.ProcessProbeConfig;
 
@@ -23,18 +21,18 @@ import java.util.function.Consumer;
 
 public class ProbeSelectorWidget {
     private final int x, y, width, height;
-    private final TextRenderer textRenderer;
+    private final Font textRenderer;
     private final List<ProcessProbeConfig> probes = new ArrayList<>();
 
     private DropdownWidget dropdown;
-    private ButtonWidget editButton;
-    private TextFieldWidget renameField;
+    private Button editButton;
+    private EditBox renameField;
 
     private int selectedIndex = 0;
     private boolean isRenaming = false;
     private Consumer<ProcessProbeConfig> onConfigUpdate;
 
-    public ProbeSelectorWidget(int x, int y, int width, int height, TextRenderer textRenderer) {
+    public ProbeSelectorWidget(int x, int y, int width, int height, Font textRenderer) {
         this.x = x;
         this.y = y;
         this.width = width;
@@ -48,7 +46,7 @@ public class ProbeSelectorWidget {
         return dropdown != null && dropdown.isOpen();
     }
 
-    public void renderDropdownIfOpen(DrawContext context, int mouseX, int mouseY) {
+    public void renderDropdownIfOpen(GuiGraphicsExtractor context, int mouseX, int mouseY) {
         if (dropdown != null && dropdown.isOpen()) {
             dropdown.renderDropdown(context, mouseX, mouseY);
         }
@@ -56,17 +54,17 @@ public class ProbeSelectorWidget {
 
     private void initWidgets() {
         int dropdownWidth = width - 25;
-        dropdown = new DropdownWidget(x, y, dropdownWidth, height, Text.literal(""));
+        dropdown = new DropdownWidget(x, y, dropdownWidth, height, Component.literal(""));
 
-        editButton = ButtonWidget.builder(
-                Text.literal("✏"),
+        editButton = Button.builder(
+                Component.literal("✏"),
                 btn -> startRenaming()
-        ).dimensions(x + dropdownWidth + 2, y, 20, height).build();
+        ).bounds(x + dropdownWidth + 2, y, 20, height).build();
 
-        renameField = new TextFieldWidget(textRenderer, x, y, dropdownWidth, height, Text.literal(""));
+        renameField = new EditBox(textRenderer, x, y, dropdownWidth, height, Component.literal(""));
         renameField.setMaxLength(32);
         renameField.setVisible(false);
-        renameField.setDrawsBackground(true);
+        renameField.setBordered(true);
     }
 
     public void updateProbes(Map<BlockPos, ProcessProbeConfig> probeConfigs) {
@@ -132,7 +130,7 @@ public class ProbeSelectorWidget {
         isRenaming = true;
         ProcessProbeConfig config = probes.get(selectedIndex);
 
-        renameField.setText(config.customName != null ? config.customName : "");
+        renameField.setValue(config.customName != null ? config.customName : "");
         renameField.setVisible(true);
         renameField.setFocused(true);
         dropdown.visible = false;
@@ -142,7 +140,7 @@ public class ProbeSelectorWidget {
         if (!isRenaming) return;
 
         isRenaming = false;
-        String newName = renameField.getText().trim();
+        String newName = renameField.getValue().trim();
 
         ProcessProbeConfig config = probes.get(selectedIndex);
 
@@ -186,19 +184,18 @@ public class ProbeSelectorWidget {
         dropdown.setSelectedIndex(selectedIndex);
     }
 
-    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
         if (isRenaming) {
-            renameField.render(context, mouseX, mouseY, delta);
+            renameField.extractRenderState(context, mouseX, mouseY, delta);
         } else {
-            dropdown.render(context, mouseX, mouseY, delta);
+            dropdown.extractRenderState(context, mouseX, mouseY, delta);
         }
-        editButton.render(context, mouseX, mouseY, delta);
+        editButton.extractRenderState(context, mouseX, mouseY, delta);
     }
 
-    //? if >=1.21.9 {
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        MouseInput mouseInput = new MouseInput(button, 0);
-        Click click = new Click(mouseX, mouseY, mouseInput);
+        MouseButtonInfo mouseInput = new MouseButtonInfo(button, 0);
+        MouseButtonEvent click = new MouseButtonEvent(mouseX, mouseY, mouseInput);
 
         if (isRenaming) {
             if (renameField.mouseClicked(click, false)) {
@@ -222,14 +219,14 @@ public class ProbeSelectorWidget {
 
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (isRenaming) {
-            KeyInput input = new KeyInput(keyCode, scanCode, modifiers);
+            KeyEvent input = new KeyEvent(keyCode, scanCode, modifiers);
 
             if (keyCode == 257 || keyCode == 335) { // Enter or Numpad Enter
                 finishRenaming();
                 return true;
             }
             if (keyCode == 256) { // Escape
-                renameField.setText("");
+                renameField.setValue("");
                 finishRenaming();
                 return true;
             }
@@ -241,72 +238,11 @@ public class ProbeSelectorWidget {
 
     public boolean charTyped(char chr, int modifiers) {
         if (isRenaming) {
-            CharInput input = new CharInput(chr, modifiers);
+            CharacterEvent input = new CharacterEvent(chr);
             return renameField.charTyped(input);
         }
         return false;
     }
-    //?} else {
-    /*public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (isRenaming) {
-            // In 1.21.8, check bounds manually instead of calling mouseClicked
-            int fx = renameField.getX();
-            int fy = renameField.getY();
-            int fw = renameField.getWidth();
-            int fh = renameField.getHeight();
-
-            if (mouseX >= fx && mouseX < fx + fw && mouseY >= fy && mouseY < fy + fh) {
-                renameField.setFocused(true);
-                renameField.onClick(mouseX, mouseY);
-                return true;
-            }
-            finishRenaming();
-            return true;
-        }
-
-        // Check button bounds manually
-        int bx = editButton.getX();
-        int by = editButton.getY();
-        int bw = editButton.getWidth();
-        int bh = editButton.getHeight();
-
-        if (mouseX >= bx && mouseX < bx + bw && mouseY >= by && mouseY < by + bh) {
-            editButton.onPress();
-            return true;
-        }
-
-        if (dropdown.mouseClicked(mouseX, mouseY, button)) {
-            selectedIndex = dropdown.getSelectedIndex();
-            return true;
-        }
-
-        return false;
-    }
-
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (isRenaming) {
-            if (keyCode == 257 || keyCode == 335) { // Enter or Numpad Enter
-                finishRenaming();
-                return true;
-            }
-            if (keyCode == 256) { // Escape
-                renameField.setText("");
-                finishRenaming();
-                return true;
-            }
-            renameField.keyPressed(keyCode, scanCode, modifiers);
-            return true;
-        }
-        return false;
-    }
-
-    public boolean charTyped(char chr, int modifiers) {
-        if (isRenaming) {
-            return renameField.charTyped(chr, modifiers);
-        }
-        return false;
-    }
-    *///?}
 
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
         if (dropdown != null && dropdown.isOpen()) {

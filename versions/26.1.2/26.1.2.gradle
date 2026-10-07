@@ -1,0 +1,3 @@
+property "minecraft_version", "26.1.2"
+property "loader_version", "0.19.5"
+property "fabric_version", "0.155.3+26.1.2"

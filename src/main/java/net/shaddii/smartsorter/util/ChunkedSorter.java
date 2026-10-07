@@ -3,8 +3,8 @@ package net.shaddii.smartsorter.util;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerPlayer;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 import net.shaddii.smartsorter.network.OverflowNotificationPayload;
 import net.shaddii.smartsorter.network.SortProgressPayload;
@@ -24,7 +24,7 @@ public class ChunkedSorter {
                 Map.Entry<UUID, SortTask> entry = iterator.next();
                 SortTask task = entry.getValue();
 
-                ServerPlayerEntity player = server.getPlayerManager().getPlayer(entry.getKey());
+                ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
                 if (player == null) {
                     iterator.remove();
                     continue;
@@ -39,8 +39,8 @@ public class ChunkedSorter {
         });
     }
 
-    public static void startSorting(ServerPlayerEntity player, StorageControllerBlockEntity controller, List<BlockPos> positions) {
-        UUID playerId = player.getUuid();
+    public static void startSorting(ServerPlayer player, StorageControllerBlockEntity controller, List<BlockPos> positions) {
+        UUID playerId = player.getUUID();
 
         activeTasks.remove(playerId);
 
@@ -72,7 +72,7 @@ public class ChunkedSorter {
             this.positions = positions;
         }
 
-        boolean processChunk(ServerPlayerEntity player) {
+        boolean processChunk(ServerPlayer player) {
             int processed = 0;
 
             while (currentIndex < positions.size() && processed < CHESTS_PER_TICK) {
@@ -95,7 +95,7 @@ public class ChunkedSorter {
             if (currentIndex < positions.size()) {
                 return false;
             } else {
-                controller.markDirty();
+                controller.setChanged();
                 controller.updateNetworkCache();
 
                 ServerPlayNetworking.send(player, new SortProgressPayload(
@@ -111,7 +111,7 @@ public class ChunkedSorter {
                     ));
                 }
 
-                if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+                if (player.containerMenu instanceof StorageControllerScreenHandler handler) {
                     handler.sendNetworkUpdate(player);
                 }
 

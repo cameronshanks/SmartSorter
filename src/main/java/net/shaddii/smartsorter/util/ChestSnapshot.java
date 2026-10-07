@@ -3,9 +3,9 @@ package net.shaddii.smartsorter.util;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 
 /**
  * What one probe's target chest contains, so accepts() can answer with set
@@ -26,11 +26,11 @@ public final class ChestSnapshot {
     private final ObjectOpenHashSet<ItemVariant> variantsWithRoom = new ObjectOpenHashSet<>();
     private boolean hasEmptySlot;
 
-    private Inventory source;
+    private Container source;
     private long version = Long.MIN_VALUE;
     private long builtAt;
 
-    public boolean isCurrent(Inventory inv, long currentVersion, long now, int maxAge) {
+    public boolean isCurrent(Container inv, long currentVersion, long now, int maxAge) {
         return this.source == inv
                 && this.version == currentVersion
                 && currentVersion != Long.MIN_VALUE
@@ -38,16 +38,16 @@ public final class ChestSnapshot {
                 && (maxAge <= 0 || now - this.builtAt < maxAge);
     }
 
-    public void rebuild(Inventory inv, long now) {
+    public void rebuild(Container inv, long now) {
         this.variants.clear();
         this.items.clear();
         this.variantsWithRoom.clear();
         this.hasEmptySlot = false;
 
-        int perStack = inv.getMaxCountPerStack();
-        int size = inv.size();
+        int perStack = inv.getMaxStackSize();
+        int size = inv.getContainerSize();
         for (int i = 0; i < size; i++) {
-            ItemStack stack = inv.getStack(i);
+            ItemStack stack = inv.getItem(i);
             if (stack.isEmpty()) {
                 this.hasEmptySlot = true;
                 continue;
@@ -55,7 +55,7 @@ public final class ChestSnapshot {
             ItemVariant variant = ItemVariant.of(stack);
             this.variants.add(variant);
             this.items.add(stack.getItem());
-            if (stack.getCount() < Math.min(stack.getMaxCount(), perStack)) {
+            if (stack.getCount() < Math.min(stack.getMaxStackSize(), perStack)) {
                 this.variantsWithRoom.add(variant);
             }
         }

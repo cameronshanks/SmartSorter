@@ -1,15 +1,11 @@
 package net.shaddii.smartsorter.client;
 
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.item.ItemStack;
-//? if >=1.21.8 {
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.world.item.ItemStack;
 import org.joml.Matrix3x2f;
-//?} else {
-/*import net.minecraft.client.util.math.MatrixStack;
- *///?}
 
 import java.util.*;
 
@@ -102,12 +98,12 @@ public class OverflowNotificationOverlay {
             lastScrollTime = System.currentTimeMillis();
         }
 
-        public static void render(DrawContext context, float tickDelta) {
+        public static void render(GuiGraphicsExtractor context, float tickDelta) {
         if (entries.isEmpty()) return;
 
-        MinecraftClient client = MinecraftClient.getInstance();
-        TextRenderer textRenderer = client.textRenderer;
-        int screenWidth = client.getWindow().getScaledWidth();
+        Minecraft client = Minecraft.getInstance();
+        Font textRenderer = client.font;
+        int screenWidth = client.getWindow().getGuiScaledWidth();
 
         entries.removeIf(OverflowEntry::shouldRemove);
 
@@ -160,7 +156,7 @@ public class OverflowNotificationOverlay {
         }
     }
 
-    private static void renderEntry(DrawContext context, TextRenderer textRenderer, OverflowEntry entry,
+    private static void renderEntry(GuiGraphicsExtractor context, Font textRenderer, OverflowEntry entry,
                                     int x, int y, int width, float alpha) {
         int alphaInt = (int) (alpha * 255);
         int textColor = (alphaInt << 24) | 0xFFFFFF;
@@ -169,23 +165,16 @@ public class OverflowNotificationOverlay {
 
         ItemStack stack = entry.variant.toStack();
 
-        //? if >=1.21.8 {
-        context.getMatrices().pushMatrix();
-        context.getMatrices().translate(new org.joml.Vector2f(x, y));
-        context.drawItem(stack, 0, 0);
-        context.getMatrices().popMatrix();
-        //?} else {
-        /*context.getMatrices().push();
-        context.getMatrices().translate(x, y, 0);
-        context.drawItem(stack, 0, 0);
-        context.getMatrices().pop();
-        *///?}
+        context.pose().pushMatrix();
+        context.pose().translate(new org.joml.Vector2f(x, y));
+        context.item(stack, 0, 0);
+        context.pose().popMatrix();
 
         int textX = x + ICON_SIZE + 3;
         int textY = y;
 
         // Item name (top line, very compact)
-        String itemName = entry.variant.getItem().getName().getString();
+        String itemName = entry.variant.getItem().components().getOrDefault(net.minecraft.core.component.DataComponents.ITEM_NAME, net.minecraft.network.chat.CommonComponents.EMPTY).getString();
         if (itemName.length() > 18) {
             itemName = itemName.substring(0, 15) + "...";
         }
@@ -203,31 +192,22 @@ public class OverflowNotificationOverlay {
         drawScaledText(context, textRenderer, bottomLine, textX, textY + 8, amountColor, TEXT_SCALE * 0.85f);
     }
 
-    private static void drawScaledText(DrawContext context, TextRenderer textRenderer, String text,
+    private static void drawScaledText(GuiGraphicsExtractor context, Font textRenderer, String text,
                                        int x, int y, int color, float scale) {
-        //? if >=1.21.8 {
-        Matrix3x2f oldMatrix = new Matrix3x2f(context.getMatrices());
+        Matrix3x2f oldMatrix = new Matrix3x2f(context.pose());
         Matrix3x2f scaleMatrix = new Matrix3x2f().scaling(scale, scale);
-        context.getMatrices().mul(scaleMatrix);
+        context.pose().mul(scaleMatrix);
         Matrix3x2f translateMatrix = new Matrix3x2f().translation(x / scale, y / scale);
-        context.getMatrices().mul(translateMatrix);
-        context.drawText(textRenderer, text, 0, 0, color, false);
-        context.getMatrices().set(oldMatrix);
-        //?} else {
-        /*MatrixStack matrices = context.getMatrices();
-        matrices.push();
-        matrices.scale(scale, scale, scale);
-        matrices.translate(x / scale, y / scale, 0);
-        context.drawText(textRenderer, text, 0, 0, color, false);
-        matrices.pop();
-        *///?}
+        context.pose().mul(translateMatrix);
+        context.text(textRenderer, text, 0, 0, color, false);
+        context.pose().set(oldMatrix);
     }
 
     public static boolean handleMouseScroll(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
         if (entries.isEmpty() || entries.size() <= MAX_VISIBLE) return false;
 
-        MinecraftClient client = MinecraftClient.getInstance();
-        int screenWidth = client.getWindow().getScaledWidth();
+        Minecraft client = Minecraft.getInstance();
+        int screenWidth = client.getWindow().getGuiScaledWidth();
         int panelX = screenWidth - PANEL_WIDTH - 10;
         int panelY = PANEL_Y_OFFSET;
         int visibleCount = Math.min(entries.size(), MAX_VISIBLE);
@@ -252,8 +232,8 @@ public class OverflowNotificationOverlay {
     public static boolean handleMouseClick(double mouseX, double mouseY, int button) {
         if (entries.isEmpty()) return false;
 
-        MinecraftClient client = MinecraftClient.getInstance();
-        int screenWidth = client.getWindow().getScaledWidth();
+        Minecraft client = Minecraft.getInstance();
+        int screenWidth = client.getWindow().getGuiScaledWidth();
         int panelX = screenWidth - PANEL_WIDTH - 10;
         int panelY = PANEL_Y_OFFSET;
         int visibleCount = Math.min(entries.size(), MAX_VISIBLE);

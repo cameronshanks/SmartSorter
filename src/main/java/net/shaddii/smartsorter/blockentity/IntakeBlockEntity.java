@@ -1,14 +1,13 @@
 package net.shaddii.smartsorter.blockentity;
 
-import net.minecraft.block.BlockState;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.registry.RegistryWrapper;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.StorageLogic;
+import net.shaddii.smartsorter.chunk.ChunkKeeper;
 import net.shaddii.smartsorter.intake.IntakeBuffer;
 
 import java.util.ArrayList;
@@ -53,11 +52,11 @@ public class IntakeBlockEntity extends BlockEntity {
     // TICK LOGIC
     // ========================================
 
-    public static void tick(World world, BlockPos pos, BlockState state, IntakeBlockEntity be) {
-        if (world.isClient()) return;
+    public static void tick(Level world, BlockPos pos, BlockState state, IntakeBlockEntity be) {
+        if (world.isClientSide()) return;
 
         // Validate links periodically
-        if (world.getTime() % VALIDATION_INTERVAL == 0L) {
+        if (world.getGameTime() % VALIDATION_INTERVAL == 0L) {
             be.validateLinks(world);
         }
 
@@ -86,28 +85,28 @@ public class IntakeBlockEntity extends BlockEntity {
         if (anyMoved) {
             be.consecutiveSuccesses++;
             be.cooldown = ACTIVE_COOLDOWN; // Keep processing immediately
-            be.markDirty();
+            be.setChanged();
         } else {
             be.consecutiveSuccesses = 0;
             be.cooldown = IDLE_COOLDOWN; // Back off when idle
         }
     }
 
-    private void validateLinks(World world) {
+    private void validateLinks(Level world) {
         // Links in unloaded chunks are kept: looking them up would force-load the chunk.
 
         // Validate controller
-        if (controllerPos != null && world.isChunkLoaded(controllerPos)) {
+        if (controllerPos != null && world.hasChunkAt(controllerPos)) {
             BlockEntity be = world.getBlockEntity(controllerPos);
             if (!(be instanceof net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity)) {
                 controllerPos = null;
-                markDirty();
+                setChanged();
             }
         }
 
         // Validate output probes
         outputs.removeIf(outputPos -> {
-            if (!world.isChunkLoaded(outputPos)) return false;
+            if (!world.hasChunkAt(outputPos)) return false;
             BlockEntity be = world.getBlockEntity(outputPos);
             return !(be instanceof net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity);
         });
@@ -122,7 +121,7 @@ public class IntakeBlockEntity extends BlockEntity {
             controllerPos = pos;
             outputs.clear();
             consecutiveSuccesses = 0; // Reset performance tracking
-            markDirty();
+            setChanged();
             return true;
         }
         return false;
@@ -136,7 +135,7 @@ public class IntakeBlockEntity extends BlockEntity {
         if (controllerPos != null) {
             controllerPos = null;
             consecutiveSuccesses = 0;
-            markDirty();
+            setChanged();
             return true;
         }
         return false;
@@ -151,7 +150,7 @@ public class IntakeBlockEntity extends BlockEntity {
             outputs.add(probePos);
             controllerPos = null;
             consecutiveSuccesses = 0;
-            markDirty();
+            setChanged();
             return true;
         }
         return false;
@@ -160,7 +159,7 @@ public class IntakeBlockEntity extends BlockEntity {
     public boolean removeOutput(BlockPos probePos) {
         boolean removed = outputs.remove(probePos);
         if (removed) {
-            markDirty();
+            setChanged();
         }
         return removed;
     }
@@ -194,10 +193,9 @@ public class IntakeBlockEntity extends BlockEntity {
     // NBT SERIALIZATION
     // ========================================
 
-    //? if >=1.21.8 {
     @Override
-    protected void writeData(net.minecraft.storage.WriteView view) {
-        super.writeData(view);
+    protected void saveAdditional(net.minecraft.world.level.storage.ValueOutput view) {
+        super.saveAdditional(view);
 
         // Controller
         if (controllerPos != null) {
@@ -215,7 +213,7 @@ public class IntakeBlockEntity extends BlockEntity {
         int count = 0;
         for (IntakeBuffer.Entry entry : intakeBuffer.entries()) {
             if (!entry.stack.isEmpty()) {
-                view.put("ssbulk_buf_" + count, ItemStack.CODEC, entry.stack);
+                view.store("ssbulk_buf_" + count, ItemStack.CODEC, entry.stack);
                 count++;
             }
         }
@@ -223,81 +221,52 @@ public class IntakeBlockEntity extends BlockEntity {
     }
 
     @Override
-    protected void readData(net.minecraft.storage.ReadView view) {
-        super.readData(view);
+    protected void loadAdditional(net.minecraft.world.level.storage.ValueInput view) {
+        super.loadAdditional(view);
 
         // Controller
         controllerPos = null;
-        view.getOptionalLong("controller").ifPresent(pos -> controllerPos = BlockPos.fromLong(pos));
+        view.getLong("controller").ifPresent(pos -> controllerPos = BlockPos.of(pos));
 
         // Outputs
         outputs.clear();
-        int c = view.getInt("out_count", 0);
+        int c = view.getIntOr("out_count", 0);
         for (int i = 0; i < c; i++) {
-            view.getOptionalLong("o" + i).ifPresent(pos -> outputs.add(BlockPos.fromLong(pos)));
+            view.getLong("o" + i).ifPresent(pos -> outputs.add(BlockPos.of(pos)));
         }
 
         // Buffer. Everything loaded is retried on the first pass (retry time 0).
         intakeBuffer.drain();
         // Original Smart Sorter's single buffer stack
         view.read("buffer", ItemStack.OPTIONAL_CODEC).ifPresent(stack -> intakeBuffer.add(stack, 0L));
-        int count = view.getInt("ssbulk_buf_count", 0);
+        int count = view.getIntOr("ssbulk_buf_count", 0);
         for (int i = 0; i < count; i++) {
             view.read("ssbulk_buf_" + i, ItemStack.CODEC).ifPresent(stack -> intakeBuffer.add(stack, 0L));
         }
     }
-    //?} else {
-    
-        /*@Override
-        protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
-            super.writeNbt(nbt, registryLookup);
 
-            // Controller
-            if (controllerPos != null) {
-                nbt.putLong("controller", controllerPos.asLong());
-            }
+    /** Runs before the block entity is removed, for every kind of removal. */
+    @Override
+    public void preRemoveSideEffects(BlockPos pos, BlockState state) {
+        super.preRemoveSideEffects(pos, state);
+        if (!(level instanceof net.minecraft.server.level.ServerLevel world)) return;
 
-            // Direct outputs
-            nbt.putInt("out_count", outputs.size());
-            for (int i = 0; i < outputs.size(); i++) {
-                nbt.putLong("o" + i, outputs.get(i).asLong());
-            }
+        // Scatter buffered items
+        for (ItemStack stack : intakeBuffer.drain()) {
+            net.minecraft.world.Containers.dropItemStack(world, pos.getX(), pos.getY(), pos.getZ(), stack);
+        }
+        ChunkKeeper.unregister(world, pos);
 
-            // Buffer
-            if (!buffer.isEmpty()) {
-                nbt.put("buffer", ItemStack.OPTIONAL_CODEC.encodeStart(registryLookup.getOps(net.minecraft.nbt.NbtOps.INSTANCE), buffer)
-                        .getOrThrow());
-            }
+        // Unlink from controller
+        if (controllerPos != null && world.getBlockEntity(controllerPos) instanceof StorageControllerBlockEntity controller) {
+            controller.removeIntake(pos);
         }
 
-        @Override
-        protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
-            super.readNbt(nbt, registryLookup);
-
-            // Controller
-            controllerPos = null;
-            if (nbt.contains("controller")) {
-                controllerPos = BlockPos.fromLong(nbt.getLong("controller"));
-            }
-
-            // Outputs
-            outputs.clear();
-            int c = nbt.getInt("out_count");
-            for (int i = 0; i < c; i++) {
-                if (nbt.contains("o" + i)) {
-                    outputs.add(BlockPos.fromLong(nbt.getLong("o" + i)));
-                }
-            }
-
-            // Buffer
-            if (nbt.contains("buffer")) {
-                buffer = ItemStack.OPTIONAL_CODEC.parse(registryLookup.getOps(net.minecraft.nbt.NbtOps.INSTANCE), nbt.get("buffer"))
-                        .result()
-                        .orElse(ItemStack.EMPTY);
-            } else {
-                buffer = ItemStack.EMPTY;
+        // Unlink from probes (direct mode)
+        for (BlockPos probePos : new ArrayList<>(outputs)) {
+            if (world.getBlockEntity(probePos) instanceof OutputProbeBlockEntity probe) {
+                probe.removeLinkedBlock(pos);
             }
         }
-        
-        *///?}
+    }
 }

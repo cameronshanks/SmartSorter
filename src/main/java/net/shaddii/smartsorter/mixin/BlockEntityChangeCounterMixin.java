@@ -5,9 +5,7 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-
-import net.minecraft.block.entity.BlockEntity;
-
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.shaddii.smartsorter.util.ChangeCounter;
 
 /**
@@ -21,7 +19,7 @@ public abstract class BlockEntityChangeCounterMixin implements ChangeCounter {
     @Unique
     private long smartsorter$changeCount;
 
-    @Inject(method = "markDirty()V", at = @At("HEAD"))
+    @Inject(method = "setChanged()V", at = @At("HEAD"))
     private void smartsorter$countChange(CallbackInfo ci) {
         this.smartsorter$changeCount++;
     }

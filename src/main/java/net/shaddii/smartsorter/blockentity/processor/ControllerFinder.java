@@ -1,11 +1,11 @@
 package net.shaddii.smartsorter.blockentity.processor;
 
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 
 import java.util.*;
@@ -39,10 +39,10 @@ public class ControllerFinder {
      * Finds a storage controller connected via redstone network.
      * Uses staged search (8 → 16 → 32 → 64 → 128 blocks) for optimization.
      */
-    public static BlockPos findController(ServerWorld world, BlockPos start) {
+    public static BlockPos findController(ServerLevel world, BlockPos start) {
         // Check cache first
         CachedResult cached = cache.get(start);
-        if (cached != null && cached.isValid(world.getTime())) {
+        if (cached != null && cached.isValid(world.getGameTime())) {
             // Validate cached result
             if (cached.controllerPos != null) {
                 BlockEntity be = world.getBlockEntity(cached.controllerPos);
@@ -62,11 +62,11 @@ public class ControllerFinder {
         }
 
         // Cache result
-        cache.put(start, new CachedResult(result, world.getTime()));
+        cache.put(start, new CachedResult(result, world.getGameTime()));
 
         // Clean old cache entries periodically
         if (cache.size() > 100) {
-            cleanCache(world.getTime());
+            cleanCache(world.getGameTime());
         }
 
         return result;
@@ -75,13 +75,13 @@ public class ControllerFinder {
     /**
      * Searches for controller within given radius using BFS.
      */
-    private static BlockPos searchRadius(ServerWorld world, BlockPos start, int radius) {
+    private static BlockPos searchRadius(ServerLevel world, BlockPos start, int radius) {
         Set<BlockPos> visited = new HashSet<>();
         Queue<BlockPos> queue = new LinkedList<>();
 
         queue.add(start);
         for (Direction dir : Direction.values()) {
-            queue.add(start.offset(dir));
+            queue.add(start.relative(dir));
         }
 
         int blocksChecked = 0;
@@ -104,7 +104,7 @@ public class ControllerFinder {
             // Check if this is a controller
             BlockEntity be = world.getBlockEntity(current);
             if (be instanceof StorageControllerBlockEntity) {
-                double dist = start.getSquaredDistance(current);
+                double dist = start.distSqr(current);
                 if (dist < closestDistance) {
                     closestDistance = dist;
                     closestController = current;
@@ -128,15 +128,15 @@ public class ControllerFinder {
     private static void expandSearch(Queue<BlockPos> queue, Set<BlockPos> visited,
                                      BlockPos current, BlockState state) {
         // Repeaters have directional priority
-        if (state.isOf(Blocks.REPEATER)) {
-            Direction facing = state.get(net.minecraft.block.RepeaterBlock.FACING);
-            queue.add(current.offset(facing));
-            queue.add(current.offset(facing.getOpposite()));
+        if (state.is(Blocks.REPEATER)) {
+            Direction facing = state.getValue(net.minecraft.world.level.block.RepeaterBlock.FACING);
+            queue.add(current.relative(facing));
+            queue.add(current.relative(facing.getOpposite()));
 
             // Check sides for T-junctions
-            for (Direction side : Direction.Type.HORIZONTAL) {
+            for (Direction side : Direction.Plane.HORIZONTAL) {
                 if (side != facing && side != facing.getOpposite()) {
-                    BlockPos sidePos = current.offset(side);
+                    BlockPos sidePos = current.relative(side);
                     if (!visited.contains(sidePos)) {
                         queue.add(sidePos);
                     }
@@ -145,17 +145,17 @@ public class ControllerFinder {
         } else {
             // Check all adjacent blocks
             for (Direction dir : Direction.values()) {
-                BlockPos neighbor = current.offset(dir);
+                BlockPos neighbor = current.relative(dir);
                 if (!visited.contains(neighbor)) {
                     queue.add(neighbor);
                 }
             }
 
             // Check diagonals for redstone wire
-            if (state.isOf(Blocks.REDSTONE_WIRE)) {
-                for (Direction horizontal : Direction.Type.HORIZONTAL) {
+            if (state.is(Blocks.REDSTONE_WIRE)) {
+                for (Direction horizontal : Direction.Plane.HORIZONTAL) {
                     for (Direction vertical : new Direction[]{Direction.UP, Direction.DOWN}) {
-                        BlockPos diagonal = current.offset(horizontal).offset(vertical);
+                        BlockPos diagonal = current.relative(horizontal).relative(vertical);
                         if (!visited.contains(diagonal)) {
                             queue.add(diagonal);
                         }
@@ -169,14 +169,14 @@ public class ControllerFinder {
      * Checks if block is a redstone component.
      */
     private static boolean isRedstoneComponent(BlockState state) {
-        return state.isOf(Blocks.REDSTONE_WIRE) ||
-                state.isOf(Blocks.LEVER) ||
-                state.isOf(Blocks.REDSTONE_TORCH) ||
-                state.isOf(Blocks.REDSTONE_WALL_TORCH) ||
-                state.isOf(Blocks.REDSTONE_BLOCK) ||
-                state.isOf(Blocks.REPEATER) ||
-                state.isOf(Blocks.COMPARATOR) ||
-                state.emitsRedstonePower();
+        return state.is(Blocks.REDSTONE_WIRE) ||
+                state.is(Blocks.LEVER) ||
+                state.is(Blocks.REDSTONE_TORCH) ||
+                state.is(Blocks.REDSTONE_WALL_TORCH) ||
+                state.is(Blocks.REDSTONE_BLOCK) ||
+                state.is(Blocks.REPEATER) ||
+                state.is(Blocks.COMPARATOR) ||
+                state.isSignalSource();
     }
 
     private static int getManhattanDistance(BlockPos a, BlockPos b) {

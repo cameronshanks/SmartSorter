@@ -1,11 +1,11 @@
 package net.shaddii.smartsorter.network;
 
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
-import net.minecraft.item.ItemStack;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.ItemStack;
 import net.shaddii.smartsorter.SmartSorter;
 
 import java.util.HashMap;
@@ -14,20 +14,20 @@ import java.util.Map;
 public record OverflowNotificationPayload(
         Map<ItemVariant, Long> overflowedItems,
         Map<ItemVariant, String> overflowDestinations
-) implements CustomPayload {
+) implements CustomPacketPayload {
 
-    public static final CustomPayload.Id<OverflowNotificationPayload> ID =
-            new CustomPayload.Id<>(Identifier.of(SmartSorter.MOD_ID, "overflow_notification"));
+    public static final CustomPacketPayload.Type<OverflowNotificationPayload> ID =
+            new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath(SmartSorter.MOD_ID, "overflow_notification"));
 
-    public static final PacketCodec<RegistryByteBuf, OverflowNotificationPayload> CODEC = PacketCodec.of(
+    public static final StreamCodec<RegistryFriendlyByteBuf, OverflowNotificationPayload> CODEC = StreamCodec.ofMember(
             (payload, buf) -> {
                 buf.writeInt(payload.overflowedItems.size());
                 for (Map.Entry<ItemVariant, Long> entry : payload.overflowedItems.entrySet()) {
                     ItemStack stack = entry.getKey().toStack();
-                    ItemStack.PACKET_CODEC.encode(buf, stack);
+                    ItemStack.STREAM_CODEC.encode(buf, stack);
                     buf.writeLong(entry.getValue());
                     String destination = payload.overflowDestinations.getOrDefault(entry.getKey(), "Unknown");
-                    buf.writeString(destination);
+                    buf.writeUtf(destination);
                 }
             },
             buf -> {
@@ -36,10 +36,10 @@ public record OverflowNotificationPayload(
                 Map<ItemVariant, String> destinations = new HashMap<>();
 
                 for (int i = 0; i < size; i++) {
-                    ItemStack stack = ItemStack.PACKET_CODEC.decode(buf);
+                    ItemStack stack = ItemStack.STREAM_CODEC.decode(buf);
                     ItemVariant variant = ItemVariant.of(stack);
                     long count = buf.readLong();
-                    String destination = buf.readString();
+                    String destination = buf.readUtf();
 
                     items.put(variant, count);
                     destinations.put(variant, destination);
@@ -50,7 +50,7 @@ public record OverflowNotificationPayload(
     );
 
     @Override
-    public Id<? extends CustomPayload> getId() {
+    public Type<? extends CustomPacketPayload> type() {
         return ID;
     }
 }

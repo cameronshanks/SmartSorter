@@ -1,9 +1,8 @@
 package net.shaddii.smartsorter.screen.tabs;
 
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.core.BlockPos;
 import net.shaddii.smartsorter.network.CollectXpPayload;
 import net.shaddii.smartsorter.screen.StorageControllerScreen;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
@@ -33,7 +32,7 @@ public class AutoProcessingTabComponent extends TabComponent {
         probeSelector = new ProbeSelectorWidget(
                 guiX + 8, guiY + 18,
                 backgroundWidth - 16, 10,
-                parent.getTextRenderer()  // Use parent.getTextRenderer() instead of textRenderer
+                parent.getFont()  // Use parent.getTextRenderer() instead of textRenderer
         );
 
         Map<BlockPos, ProcessProbeConfig> configs = handler.getProcessProbeConfigs();
@@ -57,7 +56,7 @@ public class AutoProcessingTabComponent extends TabComponent {
         configPanel = new ProbeConfigPanel(
                 guiX + 8, guiY + 30,
                 backgroundWidth - 16, 75,
-                parent.getTextRenderer()  // Use parent.getTextRenderer() instead of textRenderer
+                parent.getFont()  // Use parent.getTextRenderer() instead of textRenderer
         );
 
         ProcessProbeConfig selected = probeSelector.getSelectedProbe();
@@ -73,17 +72,17 @@ public class AutoProcessingTabComponent extends TabComponent {
     // Continue with other methods, replacing all instances of `textRenderer` with `parent.getTextRenderer()`
 
     @Override
-    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        context.drawText(parent.getTextRenderer(), "Process Config", guiX + 8, guiY + 6, 0xFF404040, false);
+    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+        context.text(parent.getFont(), "Process Config", guiX + 8, guiY + 6, 0xFF404040, false);
 
         renderXpDisplay(context, mouseX, mouseY);
 
         if (probeSelector != null) {
-            probeSelector.render(context, mouseX, mouseY, delta);
+            probeSelector.extractRenderState(context, mouseX, mouseY, delta);
         }
 
         if (configPanel != null) {
-            configPanel.render(context, mouseX, mouseY, delta);
+            configPanel.extractRenderState(context, mouseX, mouseY, delta);
         }
 
         renderFloatingText(context);
@@ -93,13 +92,13 @@ public class AutoProcessingTabComponent extends TabComponent {
         }
     }
 
-    private void renderXpDisplay(DrawContext context, int mouseX, int mouseY) {
+    private void renderXpDisplay(GuiGraphicsExtractor context, int mouseX, int mouseY) {
         int xp = handler.getStoredExperience();
         long timeSinceCollection = System.currentTimeMillis() - lastCollectionTime;
 
         float textScale = 0.7f;
         String xpText = "XP: " + xp;
-        int xpTextWidth = (int)(parent.getTextRenderer().getWidth(xpText) * textScale);
+        int xpTextWidth = (int)(parent.getFont().width(xpText) * textScale);
 
         int xpX = guiX + backgroundWidth - 85;
         int xpY = guiY + 6;
@@ -136,7 +135,7 @@ public class AutoProcessingTabComponent extends TabComponent {
         parent.drawScaledText(context, "Collect", btnX + 3, btnY + 2, btnTextScale, textColor);
     }
 
-    private void renderFloatingText(DrawContext context) {
+    private void renderFloatingText(GuiGraphicsExtractor context) {
         long timeSinceCollection = System.currentTimeMillis() - lastCollectionTime;
         if (timeSinceCollection < 2000 && lastCollectedXp > 0) {
             float alpha = 1.0f - (timeSinceCollection / 2000.0f);
@@ -144,7 +143,7 @@ public class AutoProcessingTabComponent extends TabComponent {
 
             String collectedText = "+" + lastCollectedXp + " XP!";
             float scale = 0.7f;
-            int scaledWidth = (int)(parent.getTextRenderer().getWidth(collectedText) * scale);
+            int scaledWidth = (int)(parent.getFont().width(collectedText) * scale);
             int collectedX = guiX + backgroundWidth / 2 - scaledWidth / 2;
             int collectedY = guiY + 50 - yOffset;
 
@@ -160,7 +159,7 @@ public class AutoProcessingTabComponent extends TabComponent {
         if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             float textScale = 0.7f;
             String xpText = "XP: " + handler.getStoredExperience();
-            int xpTextWidth = (int)(parent.getTextRenderer().getWidth(xpText) * textScale);
+            int xpTextWidth = (int)(parent.getFont().width(xpText) * textScale);
 
             int xpX = guiX + backgroundWidth - 85;
             int btnX = xpX + xpTextWidth + 3;

@@ -1,43 +1,26 @@
 package net.shaddii.smartsorter.util;
 
-//? if = 1.21.1 {
-/*import com.google.gson.GsonBuilder;
- *///?}
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.JsonOps;
-//? if < 1.21.9 {
-/*import net.fabricmc.fabric.api.resource.IdentifiableResourceReloadListener;
- *///?}
-import net.minecraft.item.Item;
-import net.minecraft.registry.Registries; // <-- ADD THIS IMPORT
-import net.minecraft.resource.JsonDataLoader;
-//? if >= 1.21.8 {
-import net.minecraft.resource.ResourceFinder;
-//?}
-import net.minecraft.resource.ResourceManager;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.profiler.Profiler;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.FileToIdConverter;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.packs.resources.ResourceManager;
+import net.minecraft.server.packs.resources.SimpleJsonResourceReloadListener;
+import net.minecraft.util.profiling.ProfilerFiller;
+import net.minecraft.world.item.Item;
 import net.shaddii.smartsorter.network.CategorySyncPayload;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
 
-//? if >= 1.21.9 {
-public class CategoryManager extends JsonDataLoader<JsonElement> {
-    //?} elif = 1.21.8 {
-    /*public class CategoryManager extends JsonDataLoader<JsonElement> implements IdentifiableResourceReloadListener {
-     *///?} else {
-    /*public class CategoryManager extends JsonDataLoader implements IdentifiableResourceReloadListener {
-     *///?}
+public class CategoryManager extends SimpleJsonResourceReloadListener<JsonElement> {
     private static final Logger LOGGER = LoggerFactory.getLogger("smartsorter");
     private static CategoryManager INSTANCE;
 
-    //? if <= 1.21.8 {
-    /*private static final Identifier ID = Identifier.of("smartsorter", "category_manager");
-     *///?}
 
     private final List<Category> sortedCategories = new ArrayList<>();
     private final Map<Item, Category> itemCategoryIndex = new HashMap<>();
@@ -46,14 +29,10 @@ public class CategoryManager extends JsonDataLoader<JsonElement> {
     private boolean indexIsBuilt = false; // <-- ADD THIS FLAG
 
     public CategoryManager() {
-        //? if >= 1.21.8 {
         super(Codec.PASSTHROUGH.xmap(
                 dynamic -> dynamic.convert(JsonOps.INSTANCE).getValue(),
                 jsonElement -> new com.mojang.serialization.Dynamic<>(JsonOps.INSTANCE, jsonElement)
-        ), ResourceFinder.json("smartsorter/categories"));
-        //?} else {
-        /*super(new GsonBuilder().setPrettyPrinting().create(), "smartsorter/categories");
-         *///?}
+        ), FileToIdConverter.json("smartsorter/categories"));
     }
 
     public static CategoryManager getInstance() {
@@ -63,15 +42,9 @@ public class CategoryManager extends JsonDataLoader<JsonElement> {
         return INSTANCE;
     }
 
-    //? if <= 1.21.8 {
-    /*@Override
-    public Identifier getFabricId() {
-        return ID;
-    }
-    *///?}
 
     @Override
-    protected void apply(Map<Identifier, JsonElement> prepared, ResourceManager manager, Profiler profiler) {
+    protected void apply(Map<Identifier, JsonElement> prepared, ResourceManager manager, ProfilerFiller profiler) {
         sortedCategories.clear();
         itemCategoryIndex.clear();
         indexIsBuilt = false; // <-- RESET THE FLAG ON RELOAD
@@ -81,7 +54,7 @@ public class CategoryManager extends JsonDataLoader<JsonElement> {
         for (Map.Entry<Identifier, JsonElement> entry : prepared.entrySet()) {
             try {
                 JsonObject obj = entry.getValue().getAsJsonObject();
-                Identifier id = Identifier.of(obj.get("id").getAsString());
+                Identifier id = Identifier.parse(obj.get("id").getAsString());
                 String displayName = obj.get("display_name").getAsString();
                 String shortName = obj.has("short_name") ? obj.get("short_name").getAsString() : displayName;
                 int order = obj.get("order").getAsInt();
@@ -119,7 +92,7 @@ public class CategoryManager extends JsonDataLoader<JsonElement> {
             category.buildCache();
         }
 
-        for (Item item : Registries.ITEM) {
+        for (Item item : BuiltInRegistries.ITEM) {
             boolean foundMatch = false;
             for (Category category : sortedCategories) {
                 if (category == Category.ALL || category == Category.MISC) {

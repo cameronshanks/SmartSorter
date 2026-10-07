@@ -3,11 +3,11 @@ package net.shaddii.smartsorter.client;
 import java.util.HashSet;
 
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.shaddii.smartsorter.network.WhitelistRequestPayload;
 import net.shaddii.smartsorter.network.WhitelistToggleEditModePayload;
 import net.shaddii.smartsorter.network.WhitelistToggleEnabledPayload;
@@ -37,29 +37,29 @@ public final class ProbeWhitelistPanel {
     private static final long REQUEST_TIMEOUT_MS = 5000L;
 
     private final OutputProbeScreenHandler handler;
-    private final ButtonWidget sortingButton;
-    private final ButtonWidget editingButton;
+    private final Button sortingButton;
+    private final Button editingButton;
     private BlockPos trackedPos;
     private boolean awaitingResponse = false;
     private long requestSentAt = 0L;
 
     public ProbeWhitelistPanel(OutputProbeScreenHandler handler, int x, int y) {
         this.handler = handler;
-        this.sortingButton = ButtonWidget.builder(Text.literal("Sorting"), btn -> this.send(true))
-                .dimensions(x, y, 120, 16)
+        this.sortingButton = Button.builder(Component.literal("Sorting"), btn -> this.send(true))
+                .bounds(x, y, 120, 16)
                 .build();
-        this.editingButton = ButtonWidget.builder(Text.literal("Editing"), btn -> this.send(false))
-                .dimensions(x, y + 18, 120, 16)
+        this.editingButton = Button.builder(Component.literal("Editing"), btn -> this.send(false))
+                .bounds(x, y + 18, 120, 16)
                 .build();
         this.sortingButton.visible = false;
         this.editingButton.visible = false;
     }
 
-    public ButtonWidget sortingButton() {
+    public Button sortingButton() {
         return this.sortingButton;
     }
 
-    public ButtonWidget editingButton() {
+    public Button editingButton() {
         return this.editingButton;
     }
 
@@ -90,19 +90,19 @@ public final class ProbeWhitelistPanel {
         this.sortingButton.active = !this.awaitingResponse;
         this.editingButton.active = !this.awaitingResponse;
         if (this.awaitingResponse) {
-            this.sortingButton.setMessage(Text.literal("Loading..."));
-            this.editingButton.setMessage(Text.literal("Loading..."));
+            this.sortingButton.setMessage(Component.literal("Loading..."));
+            this.editingButton.setMessage(Component.literal("Loading..."));
         } else {
-            this.sortingButton.setMessage(Text.literal(
+            this.sortingButton.setMessage(Component.literal(
                     "Sorting: " + (config.whitelistEnabled ? "ON" : "OFF") + " (" + config.getWhitelist().size() + ")"));
-            this.editingButton.setMessage(Text.literal("Editing: " + (config.whitelistEditMode ? "ON" : "OFF")));
+            this.editingButton.setMessage(Component.literal("Editing: " + (config.whitelistEditMode ? "ON" : "OFF")));
         }
     }
 
     /** OutputProbeScreen.render() draws everything itself instead of calling super.render(). */
-    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        this.sortingButton.render(context, mouseX, mouseY, delta);
-        this.editingButton.render(context, mouseX, mouseY, delta);
+    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+        this.sortingButton.extractRenderState(context, mouseX, mouseY, delta);
+        this.editingButton.extractRenderState(context, mouseX, mouseY, delta);
     }
 
     private void send(boolean sorting) {
@@ -123,11 +123,11 @@ public final class ProbeWhitelistPanel {
      * chest is open.
      */
     public static void onServerState(WhitelistUpdatePayload payload) {
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (!(client.currentScreen instanceof OutputProbeScreen screen)) {
+        Minecraft client = Minecraft.getInstance();
+        if (!(client.screen instanceof OutputProbeScreen screen)) {
             return;
         }
-        OutputProbeScreenHandler handler = screen.getScreenHandler();
+        OutputProbeScreenHandler handler = screen.getMenu();
         ChestConfig config = handler.getChestConfig();
         if (config == null || !payload.position().equals(handler.chestPos)) {
             return;

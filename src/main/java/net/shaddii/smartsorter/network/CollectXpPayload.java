@@ -1,20 +1,20 @@
 package net.shaddii.smartsorter.network;
 
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 import net.shaddii.smartsorter.SmartSorter;
 
-public record CollectXpPayload() implements CustomPayload {
-    public static final Id<CollectXpPayload> ID =
-            new Id<>(Identifier.of(SmartSorter.MOD_ID, "collect_xp"));
+public record CollectXpPayload() implements CustomPacketPayload {
+    public static final Type<CollectXpPayload> ID =
+            new Type<>(Identifier.fromNamespaceAndPath(SmartSorter.MOD_ID, "collect_xp"));
 
-    public static final PacketCodec<RegistryByteBuf, CollectXpPayload> CODEC =
-            PacketCodec.of((buf, payload) -> {}, buf -> new CollectXpPayload());
+    public static final StreamCodec<RegistryFriendlyByteBuf, CollectXpPayload> CODEC =
+            StreamCodec.ofMember((buf, payload) -> {}, buf -> new CollectXpPayload());
 
     @Override
-    public Id<? extends CustomPayload> getId() {
+    public Type<? extends CustomPacketPayload> type() {
         return ID;
     }
 }

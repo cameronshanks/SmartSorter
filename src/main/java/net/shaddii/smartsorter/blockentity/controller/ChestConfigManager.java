@@ -1,16 +1,6 @@
 package net.shaddii.smartsorter.blockentity.controller;
 
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtElement;
-import net.minecraft.nbt.NbtList;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
 import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 import net.shaddii.smartsorter.network.ChestPriorityBatchPayload;
@@ -18,18 +8,23 @@ import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
 import net.shaddii.smartsorter.util.ChestConfig;
 import net.shaddii.smartsorter.util.ChestPriorityManager;
 
-//? if >=1.21.8 {
 import com.mojang.logging.LogUtils;
 import com.mojang.serialization.DataResult;
+import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtOps;
-import net.minecraft.storage.NbtReadView;
-import net.minecraft.text.Text;
-import net.minecraft.text.TextCodecs;
-import net.minecraft.util.ErrorReporter;
-//?} else {
-/*import net.minecraft.text.Text;
- *///?}
-
+import net.minecraft.nbt.Tag;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.ComponentSerialization;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.ProblemReporter;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.TagValueInput;
 import java.util.*;
 
 /**
@@ -47,7 +42,7 @@ public class ChestConfigManager {
     /**
      * Called when a new chest is detected by a probe.
      */
-    public void onChestDetected(World world, BlockPos chestPos, OutputProbeBlockEntity probe) {
+    public void onChestDetected(Level world, BlockPos chestPos, OutputProbeBlockEntity probe) {
         if (chestConfigs.containsKey(chestPos)) return;
 
         ChestConfig config = null;
@@ -75,7 +70,7 @@ public class ChestConfigManager {
         probeRegistry.invalidateCache();
     }
 
-    public void onAllChestsDetected(World world, List<BlockPos> linkedProbes) {
+    public void onAllChestsDetected(Level world, List<BlockPos> linkedProbes) {
         if (world == null) return;
 
         // Collect all chest configs without triggering priority assignment
@@ -138,7 +133,7 @@ public class ChestConfigManager {
     /**
      * Called when a chest is removed.
      */
-    public void onChestRemoved(World world, BlockPos chestPos, List<BlockPos> remainingProbes) {
+    public void onChestRemoved(Level world, BlockPos chestPos, List<BlockPos> remainingProbes) {
         // Check if any other probe still targets this chest
         boolean stillLinked = false;
         for (BlockPos probePos : remainingProbes) {
@@ -163,7 +158,7 @@ public class ChestConfigManager {
     /**
      * Updates a chest configuration.
      */
-    public void updateChestConfig(World world, BlockPos position, ChestConfig config,
+    public void updateChestConfig(Level world, BlockPos position, ChestConfig config,
                                   StorageControllerBlockEntity controller) {
         ChestConfig oldConfig = chestConfigs.get(position);
 
@@ -181,19 +176,28 @@ public class ChestConfigManager {
 
         } else if (config.simplePrioritySelection != null &&
                 oldConfig.simplePrioritySelection != config.simplePrioritySelection) {
-            // SimplePriority dropdown changed to a non-null value (e.g., HIGHEST, HIGH, etc.)
+            // SimplePriority dropdown changed to a non-null value (e.g., HIGHEST, HIGH, etc.).
+            // Store the rest of the update first (switching to Overflow changes the mode
+            // and the priority together), then re-rank from the old position.
+            config.priority = oldConfig.priority;
+            chestConfigs.put(position, config);
             Map<BlockPos, Integer> newPriorities = priorityManager.updateChestPriority(
                     position, config.simplePrioritySelection, chestConfigs
             );
             applyPriorityUpdates(world, newPriorities);
+            syncConfigToProbe(world, config);
 
         } else if (config.simplePrioritySelection == null &&
                 config.priority != oldConfig.priority) {
             // Manual numeric priority change (SimplePriority is null, user typed a number)
+            int targetPriority = config.priority;
+            config.priority = oldConfig.priority;
+            chestConfigs.put(position, config);
             Map<BlockPos, Integer> newPriorities = priorityManager.setManualPriority(
-                    position, config.priority, chestConfigs
+                    position, targetPriority, chestConfigs
             );
             applyPriorityUpdates(world, newPriorities);
+            syncConfigToProbe(world, config);
 
         } else {
             // Non-priority update (category, filter mode, NBT matching, etc.)
@@ -215,7 +219,7 @@ public class ChestConfigManager {
     /**
      * Removes a chest configuration.
      */
-    public void removeChestConfig(World world, BlockPos chestPos,
+    public void removeChestConfig(Level world, BlockPos chestPos,
                                   StorageControllerBlockEntity controller) {
         if (chestConfigs.containsKey(chestPos)) {
             Map<BlockPos, Integer> newPriorities = priorityManager.removeChest(chestPos, chestConfigs);
@@ -229,7 +233,7 @@ public class ChestConfigManager {
     /**
      * Gets all chest configs with live data.
      */
-    public Map<BlockPos, ChestConfig> getChestConfigs(World world, List<BlockPos> linkedProbes) {
+    public Map<BlockPos, ChestConfig> getChestConfigs(Level world, List<BlockPos> linkedProbes) {
         Map<BlockPos, ChestConfig> configs = new LinkedHashMap<>(chestConfigs);
 
         for (ChestConfig config : configs.values()) {
@@ -250,7 +254,7 @@ public class ChestConfigManager {
     /**
      * Checks if a chest is linked.
      */
-    public boolean isChestLinked(World world, BlockPos chestPos, List<BlockPos> linkedProbes) {
+    public boolean isChestLinked(Level world, BlockPos chestPos, List<BlockPos> linkedProbes) {
         if (world == null) return false;
 
         for (BlockPos probePos : linkedProbes) {
@@ -267,7 +271,7 @@ public class ChestConfigManager {
     /**
      * Clears all chest names (cleanup).
      */
-    public void clearAllChestNames(World world) {
+    public void clearAllChestNames(Level world) {
         for (BlockPos chestPos : chestConfigs.keySet()) {
             clearNameFromChest(world, chestPos);
         }
@@ -276,11 +280,11 @@ public class ChestConfigManager {
     /**
      * Writes chest configs to NBT.
      */
-    public NbtList writeToNbt() {
-        NbtList list = new NbtList();
+    public ListTag writeToNbt() {
+        ListTag list = new ListTag();
 
         for (ChestConfig config : chestConfigs.values()) {
-            NbtCompound nbt = new NbtCompound();
+            CompoundTag nbt = new CompoundTag();
             nbt.putLong("Pos", config.position.asLong());
             nbt.putString("Name", config.customName != null ? config.customName : "");
             nbt.putString("Category", config.filterCategory.asString());
@@ -301,16 +305,15 @@ public class ChestConfigManager {
     /**
      * Reads chest configs from NBT.
      */
-    public void readFromNbt(NbtList list) {
+    public void readFromNbt(ListTag list) {
         chestConfigs.clear();
 
         for (int i = 0; i < list.size(); i++) {
-            //? if >=1.21.8 {
             // Use Optional API for 1.21.8+ NbtList
             list.getCompound(i).ifPresent(nbt -> {
                 // NbtCompound methods return Optional in 1.21.8+
                 nbt.getLong("Pos").ifPresent(posLong -> {
-                    BlockPos pos = BlockPos.fromLong(posLong);
+                    BlockPos pos = BlockPos.of(posLong);
                     String name = nbt.getString("Name").orElse("");
                     String categoryStr = nbt.getString("Category").orElse("smartsorter:all");
                     int priority = nbt.getInt("Priority").orElse(1);
@@ -339,37 +342,6 @@ public class ChestConfigManager {
                     chestConfigs.put(pos, config);
                 });
             });
-            //?} else {
-            /*// Direct access for older versions
-            NbtCompound nbt = list.getCompound(i);
-            if (!nbt.contains("Pos")) continue;
-
-            BlockPos pos = BlockPos.fromLong(nbt.getLong("Pos"));
-            String name = nbt.getString("Name");
-            String categoryStr = nbt.getString("Category");
-            int priority = nbt.getInt("Priority");
-            String modeStr = nbt.getString("Mode");
-            boolean autoFrame = nbt.getBoolean("AutoFrame");
-
-            net.shaddii.smartsorter.util.Category category =
-                net.shaddii.smartsorter.util.CategoryManager.getInstance().getCategory(categoryStr);
-            ChestConfig.FilterMode mode = ChestConfig.FilterMode.valueOf(modeStr);
-
-            ChestConfig config = new ChestConfig(pos, name, category, priority, mode, autoFrame);
-
-            if (nbt.contains("SimplePriority")) {
-                try {
-                    config.simplePrioritySelection =
-                        ChestConfig.SimplePriority.valueOf(nbt.getString("SimplePriority"));
-                } catch (Exception e) {
-                    config.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
-                }
-            } else {
-                config.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
-            }
-
-            chestConfigs.put(pos, config);
-            *///?}
         }
 
         // Recalculate all priorities
@@ -393,7 +365,7 @@ public class ChestConfigManager {
         return new LinkedHashMap<>(chestConfigs);
     }
 
-    private void applyPriorityUpdates(World world, Map<BlockPos, Integer> newPriorities) {
+    private void applyPriorityUpdates(Level world, Map<BlockPos, Integer> newPriorities) {
         for (Map.Entry<BlockPos, Integer> entry : newPriorities.entrySet()) {
             ChestConfig config = chestConfigs.get(entry.getKey());
             if (config != null) {
@@ -407,7 +379,7 @@ public class ChestConfigManager {
         sendPriorityUpdatesToClients(world);
     }
 
-    private void syncConfigToProbe(World world, ChestConfig config) {
+    private void syncConfigToProbe(Level world, ChestConfig config) {
         if (world == null) return;
 
         // Find probe(s) targeting this chest
@@ -422,8 +394,8 @@ public class ChestConfigManager {
         }
     }
 
-    private void sendPriorityUpdatesToClients(World world) {
-        if (!(world instanceof net.minecraft.server.world.ServerWorld serverWorld)) return;
+    private void sendPriorityUpdatesToClients(Level world) {
+        if (!(world instanceof net.minecraft.server.level.ServerLevel serverWorld)) return;
 
         // Recalculate fullness for all configs before sending
         List<BlockPos> linkedProbes = probeRegistry.getLinkedProbes();
@@ -433,14 +405,14 @@ public class ChestConfigManager {
 
         ChestPriorityBatchPayload payload = ChestPriorityBatchPayload.fromConfigs(chestConfigs);
 
-        for (ServerPlayerEntity player : serverWorld.getPlayers()) {
-            if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+        for (ServerPlayer player : serverWorld.players()) {
+            if (player.containerMenu instanceof StorageControllerScreenHandler handler) {
                 ServerPlayNetworking.send(player, payload);
             }
         }
     }
 
-    public int calculateChestFullness(World world, BlockPos chestPos, List<BlockPos> linkedProbes) {
+    public int calculateChestFullness(Level world, BlockPos chestPos, List<BlockPos> linkedProbes) {
         if (world == null) return -1;
 
         // OPTIMIZATION: Use index to find probe directly (O(1) instead of O(n))
@@ -450,14 +422,14 @@ public class ChestConfigManager {
         BlockEntity be = world.getBlockEntity(probePos);
         if (!(be instanceof OutputProbeBlockEntity probe)) return -1;
 
-        Inventory inv = probe.getTargetInventory();
+        Container inv = probe.getTargetInventory();
         if (inv == null) return -1;
 
-        int totalSlots = inv.size();
+        int totalSlots = inv.getContainerSize();
         int occupiedSlots = 0;
 
         for (int i = 0; i < totalSlots; i++) {
-            if (!inv.getStack(i).isEmpty()) {
+            if (!inv.getItem(i).isEmpty()) {
                 occupiedSlots++;
             }
         }
@@ -465,7 +437,7 @@ public class ChestConfigManager {
         return totalSlots > 0 ? (occupiedSlots * 100 / totalSlots) : 0;
     }
 
-    private List<ItemStack> getChestPreviewItems(World world, BlockPos chestPos, List<BlockPos> linkedProbes) {
+    private List<ItemStack> getChestPreviewItems(Level world, BlockPos chestPos, List<BlockPos> linkedProbes) {
         List<ItemStack> items = new ArrayList<>();
         if (world == null) return items;
 
@@ -476,11 +448,11 @@ public class ChestConfigManager {
         BlockEntity be = world.getBlockEntity(probePos);
         if (!(be instanceof OutputProbeBlockEntity probe)) return items;
 
-        Inventory inv = probe.getTargetInventory();
+        Container inv = probe.getTargetInventory();
         if (inv == null) return items;
 
-        for (int i = 0; i < inv.size() && items.size() < 8; i++) {
-            ItemStack stack = inv.getStack(i);
+        for (int i = 0; i < inv.getContainerSize() && items.size() < 8; i++) {
+            ItemStack stack = inv.getItem(i);
             if (!stack.isEmpty()) {
                 items.add(stack.copy());
             }
@@ -489,21 +461,20 @@ public class ChestConfigManager {
         return items;
     }
 
-    //? if >=1.21.8 {
-    private void writeNameToChest(World world, BlockPos chestPos, String customName) {
+    private void writeNameToChest(Level world, BlockPos chestPos, String customName) {
         if (world == null) return;
 
         BlockEntity blockEntity = world.getBlockEntity(chestPos);
         if (blockEntity == null) return;
 
-        NbtCompound nbt = blockEntity.createNbt(world.getRegistryManager());
+        CompoundTag nbt = blockEntity.saveWithoutMetadata(world.registryAccess());
 
         if (customName == null || customName.isEmpty()) {
             nbt.remove("CustomName");
         } else {
-            Text textComponent = Text.literal(customName);
-            DataResult<NbtElement> result = TextCodecs.CODEC.encodeStart(
-                    world.getRegistryManager().getOps(NbtOps.INSTANCE),
+            Component textComponent = Component.literal(customName);
+            DataResult<Tag> result = ComponentSerialization.CODEC.encodeStart(
+                    world.registryAccess().createSerializationContext(NbtOps.INSTANCE),
                     textComponent
             );
             result.result().ifPresent(nbtElement -> {
@@ -511,31 +482,31 @@ public class ChestConfigManager {
             });
         }
 
-        try (ErrorReporter.Logging logging = new ErrorReporter.Logging(blockEntity.getReporterContext(), LogUtils.getLogger())) {
-            blockEntity.read(NbtReadView.create(logging, world.getRegistryManager(), nbt));
+        try (ProblemReporter.ScopedCollector logging = new ProblemReporter.ScopedCollector(blockEntity.problemPath(), LogUtils.getLogger())) {
+            blockEntity.loadWithComponents(TagValueInput.create(logging, world.registryAccess(), nbt));
         }
-        blockEntity.markDirty();
+        blockEntity.setChanged();
 
         BlockState state = world.getBlockState(chestPos);
-        world.updateListeners(chestPos, state, state, 3);
+        world.sendBlockUpdated(chestPos, state, state, 3);
     }
 
-    private String readNameFromChest(World world, BlockPos chestPos) {
+    private String readNameFromChest(Level world, BlockPos chestPos) {
         if (world == null) return "";
 
         BlockEntity blockEntity = world.getBlockEntity(chestPos);
         if (blockEntity == null) return "";
 
-        NbtCompound nbt = blockEntity.createNbt(world.getRegistryManager());
+        CompoundTag nbt = blockEntity.saveWithoutMetadata(world.registryAccess());
 
         if (nbt.contains("CustomName")) {
             try {
-                DataResult<Text> result = TextCodecs.CODEC.parse(
-                        world.getRegistryManager().getOps(NbtOps.INSTANCE),
+                DataResult<Component> result = ComponentSerialization.CODEC.parse(
+                        world.registryAccess().createSerializationContext(NbtOps.INSTANCE),
                         nbt.get("CustomName")
                 );
                 return result.result()
-                        .map(Text::getString)
+                        .map(Component::getString)
                         .orElse("");
             } catch (Exception e) {
                 return "";
@@ -545,83 +516,24 @@ public class ChestConfigManager {
         return "";
     }
 
-    private void clearNameFromChest(World world, BlockPos chestPos) {
+    private void clearNameFromChest(Level world, BlockPos chestPos) {
         if (world == null) return;
 
         BlockEntity blockEntity = world.getBlockEntity(chestPos);
         if (blockEntity == null) return;
 
-        NbtCompound nbt = blockEntity.createNbt(world.getRegistryManager());
+        CompoundTag nbt = blockEntity.saveWithoutMetadata(world.registryAccess());
 
         if (nbt.contains("CustomName")) {
             nbt.remove("CustomName");
 
-            try (ErrorReporter.Logging logging = new ErrorReporter.Logging(blockEntity.getReporterContext(), LogUtils.getLogger())) {
-                blockEntity.read(NbtReadView.create(logging, world.getRegistryManager(), nbt));
+            try (ProblemReporter.ScopedCollector logging = new ProblemReporter.ScopedCollector(blockEntity.problemPath(), LogUtils.getLogger())) {
+                blockEntity.loadWithComponents(TagValueInput.create(logging, world.registryAccess(), nbt));
             }
-            blockEntity.markDirty();
+            blockEntity.setChanged();
 
             BlockState state = world.getBlockState(chestPos);
-            world.updateListeners(chestPos, state, state, 3);
+            world.sendBlockUpdated(chestPos, state, state, 3);
         }
     }
-    //?} else {
-    /*private void writeNameToChest(World world, BlockPos chestPos, String customName) {
-        if (world == null) return;
-        BlockEntity blockEntity = world.getBlockEntity(chestPos);
-        if (blockEntity == null) return;
-
-        NbtCompound nbt = blockEntity.createNbt(world.getRegistryManager());
-
-        if (customName == null || customName.isEmpty()) {
-            nbt.remove("CustomName");
-        } else {
-            Text textComponent = Text.literal(customName);
-            nbt.putString("CustomName", Text.Serialization.toJsonString(textComponent, world.getRegistryManager()));
-        }
-
-        blockEntity.read(nbt, world.getRegistryManager());
-        blockEntity.markDirty();
-
-        BlockState state = world.getBlockState(chestPos);
-        world.updateListeners(chestPos, state, state, 3);
-    }
-
-    private String readNameFromChest(World world, BlockPos chestPos) {
-        if (world == null) return "";
-
-        BlockEntity blockEntity = world.getBlockEntity(chestPos);
-        if (blockEntity == null) return "";
-
-        NbtCompound nbt = blockEntity.createNbt(world.getRegistryManager());
-
-        if (nbt.contains("CustomName")) {
-            try {
-                Text customName = Text.Serialization.fromJson(nbt.getString("CustomName"), world.getRegistryManager());
-                return customName != null ? customName.getString() : "";
-            } catch (Exception e) {
-                return "";
-            }
-        }
-        return "";
-    }
-
-    private void clearNameFromChest(World world, BlockPos chestPos) {
-        if (world == null) return;
-
-        BlockEntity blockEntity = world.getBlockEntity(chestPos);
-        if (blockEntity == null) return;
-
-        NbtCompound nbt = blockEntity.createNbt(world.getRegistryManager());
-
-        if (nbt.contains("CustomName")) {
-            nbt.remove("CustomName");
-            blockEntity.read(nbt, world.getRegistryManager());
-            blockEntity.markDirty();
-
-            BlockState state = world.getBlockState(chestPos);
-            world.updateListeners(chestPos, state, state, 3);
-        }
-    }
-    *///?}
 }

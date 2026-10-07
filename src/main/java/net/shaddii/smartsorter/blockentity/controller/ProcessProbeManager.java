@@ -1,14 +1,12 @@
 package net.shaddii.smartsorter.blockentity.controller;
 
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtElement;
-import net.minecraft.nbt.NbtList;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
+import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.shaddii.smartsorter.blockentity.ProcessProbeBlockEntity;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 import net.shaddii.smartsorter.network.ProbeStatsSyncPayload;
@@ -26,7 +24,7 @@ public class ProcessProbeManager {
     /**
      * Registers a process probe with the controller.
      */
-    public boolean registerProbe(World world, BlockPos pos, String machineType) {
+    public boolean registerProbe(Level world, BlockPos pos, String machineType) {
         if (world == null) return false;
 
         BlockEntity be = world.getBlockEntity(pos);
@@ -56,7 +54,7 @@ public class ProcessProbeManager {
     /**
      * Unregisters a process probe.
      */
-    public void unregisterProbe(World world, BlockPos pos) {
+    public void unregisterProbe(Level world, BlockPos pos) {
         ProcessProbeConfig config = linkedProcessProbes.get(pos);
 
         if (config != null) {
@@ -74,7 +72,7 @@ public class ProcessProbeManager {
     /**
      * Updates probe configuration.
      */
-    public void updateConfig(World world, ProcessProbeConfig config,
+    public void updateConfig(Level world, ProcessProbeConfig config,
                              StorageControllerBlockEntity controller) {
         if (!linkedProcessProbes.containsKey(config.position)) return;
 
@@ -118,11 +116,11 @@ public class ProcessProbeManager {
     /**
      * Syncs probe stats to all viewing clients.
      */
-    public void syncStatsToClients(World world, BlockPos probePos, int itemsProcessed,
+    public void syncStatsToClients(Level world, BlockPos probePos, int itemsProcessed,
                                    StorageControllerBlockEntity controller) {
-        if (world instanceof ServerWorld serverWorld) {
-            for (ServerPlayerEntity player : serverWorld.getPlayers()) {
-                if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+        if (world instanceof ServerLevel serverWorld) {
+            for (ServerPlayer player : serverWorld.players()) {
+                if (player.containerMenu instanceof StorageControllerScreenHandler handler) {
                     if (handler.controller == controller) {
                         ServerPlayNetworking.send(player,
                                 new ProbeStatsSyncPayload(probePos, itemsProcessed));
@@ -135,7 +133,7 @@ public class ProcessProbeManager {
     /**
      * Unlinks all process probes (cleanup).
      */
-    public void unlinkAll(World world) {
+    public void unlinkAll(Level world) {
         for (BlockPos pos : new ArrayList<>(linkedProcessProbes.keySet())) {
             BlockEntity be = world.getBlockEntity(pos);
             if (be instanceof ProcessProbeBlockEntity probe) {
@@ -148,8 +146,8 @@ public class ProcessProbeManager {
     /**
      * Writes process probes to NBT.
      */
-    public NbtList writeToNbt() {
-        NbtList list = new NbtList();
+    public ListTag writeToNbt() {
+        ListTag list = new ListTag();
         for (ProcessProbeConfig config : linkedProcessProbes.values()) {
             list.add(config.toNbt());
         }
@@ -159,25 +157,16 @@ public class ProcessProbeManager {
     /**
      * Reads process probes from NBT.
      */
-    public void readFromNbt(NbtList list) {
+    public void readFromNbt(ListTag list) {
         linkedProcessProbes.clear();
 
         for (int i = 0; i < list.size(); i++) {
-            //? if >=1.21.8 {
             list.getCompound(i).ifPresent(nbt -> {
                 ProcessProbeConfig config = ProcessProbeConfig.fromNbt(nbt);
                 if (config != null && config.position != null) {
                     linkedProcessProbes.put(config.position, config);
                 }
             });
-            //?} else {
-            /*NbtCompound nbt = list.getCompound(i);
-            ProcessProbeConfig config = ProcessProbeConfig.fromNbt(nbt);
-
-            if (config != null && config.position != null) {
-                linkedProcessProbes.put(config.position, config);
-            }
-            *///?}
         }
     }
 

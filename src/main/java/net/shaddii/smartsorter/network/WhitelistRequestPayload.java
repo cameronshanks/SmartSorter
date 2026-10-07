@@ -1,11 +1,11 @@
 package net.shaddii.smartsorter.network;
 
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 
 /**
  * Client -> server only. Sent when the player opens the whitelist editor for
@@ -17,30 +17,30 @@ import net.minecraft.util.math.BlockPos;
  * The server answers with a WhitelistUpdatePayload sent directly back to the
  * requesting player (see WhitelistNetworking).
  */
-public record WhitelistRequestPayload(BlockPos position) implements CustomPayload {
+public record WhitelistRequestPayload(BlockPos position) implements CustomPacketPayload {
 
-    public static final CustomPayload.Id<WhitelistRequestPayload> ID =
-            new CustomPayload.Id<>(Identifier.of("smartsorter", "whitelist_request"));
+    public static final CustomPacketPayload.Type<WhitelistRequestPayload> ID =
+            new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath("smartsorter", "whitelist_request"));
 
-    public static final PacketCodec<RegistryByteBuf, WhitelistRequestPayload> CODEC = new PacketCodec<>() {
+    public static final StreamCodec<RegistryFriendlyByteBuf, WhitelistRequestPayload> CODEC = new StreamCodec<>() {
         @Override
-        public WhitelistRequestPayload decode(RegistryByteBuf buf) {
+        public WhitelistRequestPayload decode(RegistryFriendlyByteBuf buf) {
             return new WhitelistRequestPayload(buf.readBlockPos());
         }
 
         @Override
-        public void encode(RegistryByteBuf buf, WhitelistRequestPayload payload) {
+        public void encode(RegistryFriendlyByteBuf buf, WhitelistRequestPayload payload) {
             buf.writeBlockPos(payload.position);
         }
     };
 
     @Override
-    public CustomPayload.Id<? extends CustomPayload> getId() {
+    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
         return ID;
     }
 
     /** C2S only - the server never sends this one. */
     public static void registerCodec() {
-        PayloadTypeRegistry.playC2S().register(ID, CODEC);
+        PayloadTypeRegistry.serverboundPlay().register(ID, CODEC);
     }
 }

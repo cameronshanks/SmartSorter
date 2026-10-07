@@ -1,10 +1,10 @@
 package net.shaddii.smartsorter.network;
 
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.util.ProcessProbeConfig;
 import net.shaddii.smartsorter.util.RecipeFilterMode;
@@ -13,53 +13,53 @@ import net.shaddii.smartsorter.util.FuelFilterMode;
 import java.util.HashMap;
 import java.util.Map;
 
-public record ProbeConfigBatchPayload(Map<BlockPos, ProcessProbeConfig> configs) implements CustomPayload {
-    public static final Id<ProbeConfigBatchPayload> ID =
-            new Id<>(Identifier.of(SmartSorter.MOD_ID, "probe_config_batch"));
+public record ProbeConfigBatchPayload(Map<BlockPos, ProcessProbeConfig> configs) implements CustomPacketPayload {
+    public static final Type<ProbeConfigBatchPayload> ID =
+            new Type<>(Identifier.fromNamespaceAndPath(SmartSorter.MOD_ID, "probe_config_batch"));
 
-    public static final PacketCodec<RegistryByteBuf, ProbeConfigBatchPayload> CODEC =
-            PacketCodec.of(
+    public static final StreamCodec<RegistryFriendlyByteBuf, ProbeConfigBatchPayload> CODEC =
+            StreamCodec.ofMember(
                     (value, buf) -> write(buf, value),  // Fixed: swapped parameter order
                     buf -> read(buf)
             );
 
-    private static void write(RegistryByteBuf buf, ProbeConfigBatchPayload payload) {
+    private static void write(RegistryFriendlyByteBuf buf, ProbeConfigBatchPayload payload) {
         buf.writeVarInt(payload.configs.size());
 
         for (Map.Entry<BlockPos, ProcessProbeConfig> entry : payload.configs.entrySet()) {
             buf.writeLong(entry.getKey().asLong());
             ProcessProbeConfig config = entry.getValue();
 
-            buf.writeString(config.machineType);
+            buf.writeUtf(config.machineType);
             buf.writeBoolean(config.customName != null);
             if (config.customName != null) {
-                buf.writeString(config.customName);
+                buf.writeUtf(config.customName);
             }
             buf.writeBoolean(config.enabled);
-            buf.writeString(config.recipeFilter.asString());
-            buf.writeString(config.fuelFilter.asString());
+            buf.writeUtf(config.recipeFilter.asString());
+            buf.writeUtf(config.fuelFilter.asString());
             buf.writeVarInt(config.itemsProcessed);
             buf.writeVarInt(config.index);
         }
     }
 
-    private static ProbeConfigBatchPayload read(RegistryByteBuf buf) {
+    private static ProbeConfigBatchPayload read(RegistryFriendlyByteBuf buf) {
         Map<BlockPos, ProcessProbeConfig> configs = new HashMap<>();
         int count = buf.readVarInt();
 
         for (int i = 0; i < count; i++) {
-            BlockPos pos = BlockPos.fromLong(buf.readLong());
+            BlockPos pos = BlockPos.of(buf.readLong());
             ProcessProbeConfig config = new ProcessProbeConfig();
             config.position = pos;
-            config.machineType = buf.readString();
+            config.machineType = buf.readUtf();
 
             if (buf.readBoolean()) {
-                config.customName = buf.readString();
+                config.customName = buf.readUtf();
             }
 
             config.enabled = buf.readBoolean();
-            config.recipeFilter = RecipeFilterMode.fromString(buf.readString());
-            config.fuelFilter = FuelFilterMode.fromString(buf.readString());
+            config.recipeFilter = RecipeFilterMode.fromString(buf.readUtf());
+            config.fuelFilter = FuelFilterMode.fromString(buf.readUtf());
             config.itemsProcessed = buf.readVarInt();
             config.index = buf.readVarInt();
 
@@ -70,7 +70,7 @@ public record ProbeConfigBatchPayload(Map<BlockPos, ProcessProbeConfig> configs)
     }
 
     @Override
-    public Id<? extends CustomPayload> getId() {
+    public Type<? extends CustomPacketPayload> type() {
         return ID;
     }
 }

@@ -1,14 +1,10 @@
 package net.shaddii.smartsorter.util;
 
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.block.entity.ChestBlockEntity;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
+import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 
@@ -166,19 +162,19 @@ public class ChestConfig {
         }
     }
 
-    public static void write(RegistryByteBuf buf, ChestConfig config) {
+    public static void write(RegistryFriendlyByteBuf buf, ChestConfig config) {
         buf.writeBlockPos(config.position);
-        buf.writeString(config.customName);
-        buf.writeString(config.filterCategory.asString());
+        buf.writeUtf(config.customName);
+        buf.writeUtf(config.filterCategory.asString());
         buf.writeInt(config.priority);
-        buf.writeEnumConstant(config.filterMode);
+        buf.writeEnum(config.filterMode);
         buf.writeBoolean(config.autoItemFrame);
         buf.writeBoolean(config.strictNBTMatch);
         buf.writeInt(config.cachedFullness);
 
         if (config.simplePrioritySelection != null) {
             buf.writeBoolean(true);
-            buf.writeEnumConstant(config.simplePrioritySelection);
+            buf.writeEnum(config.simplePrioritySelection);
         } else {
             buf.writeBoolean(false);
         }
@@ -186,16 +182,16 @@ public class ChestConfig {
         // Write preview items
         buf.writeVarInt(config.previewItems.size());
         for (ItemStack stack : config.previewItems) {
-            ItemStack.PACKET_CODEC.encode(buf, stack);
+            ItemStack.STREAM_CODEC.encode(buf, stack);
         }
     }
 
-    public static ChestConfig read(RegistryByteBuf buf) {
+    public static ChestConfig read(RegistryFriendlyByteBuf buf) {
         BlockPos pos = buf.readBlockPos();
-        String name = buf.readString();
-        Category category = CategoryManager.getInstance().getCategory(buf.readString());
+        String name = buf.readUtf();
+        Category category = CategoryManager.getInstance().getCategory(buf.readUtf());
         int priority = buf.readInt();
-        FilterMode mode = buf.readEnumConstant(FilterMode.class);
+        FilterMode mode = buf.readEnum(FilterMode.class);
         boolean autoFrame = buf.readBoolean();
         boolean strictNBT = buf.readBoolean();
 
@@ -205,7 +201,7 @@ public class ChestConfig {
 
         boolean hasSimplePriority = buf.readBoolean();
         if (hasSimplePriority) {
-            config.simplePrioritySelection = buf.readEnumConstant(SimplePriority.class);
+            config.simplePrioritySelection = buf.readEnum(SimplePriority.class);
         } else {
             config.simplePrioritySelection = SimplePriority.MEDIUM;
         }
@@ -214,7 +210,7 @@ public class ChestConfig {
         int itemCount = buf.readVarInt();
         config.previewItems = new ArrayList<>();
         for (int i = 0; i < itemCount; i++) {
-            config.previewItems.add(ItemStack.PACKET_CODEC.decode(buf));
+            config.previewItems.add(ItemStack.STREAM_CODEC.decode(buf));
         }
 
         return config;
@@ -248,57 +244,33 @@ public class ChestConfig {
         }
     }
 
+    // Size of one routing tier. Priorities are ranks (1 = Highest) and never
+    // reach this, so tiers can't overlap however many chests there are.
+    private static final int TIER = 100_000;
+
     private int calculateHiddenPriority() {
-        int baseValue = filterMode.getBasePriority();
-        // Lower priority number = higher actual priority
-        // So invert it: subtract from a large number
-        return baseValue - priority;
+        // Routing order (higher hiddenPriority = tried first), one tier per mode:
+        // Filtered Priority > Custom > Priority > Dedicated > Blacklist > General > Overflow.
+        // Within a tier, a lower priority number (1 = Highest) is tried first.
+        int rank = Math.max(0, Math.min(priority, TIER - 1));
+        int tier = switch (filterMode) {
+            case CATEGORY_AND_PRIORITY -> 6;
+            case CUSTOM -> 5;
+            case PRIORITY -> 4;
+            case CATEGORY -> 3;
+            case BLACKLIST -> 2;
+            case NONE -> 1;
+            case OVERFLOW -> 0;
+        };
+        return tier * TIER - rank;
     }
 
     public void updateHiddenPriority() {
-        // Priority order (higher number = processed first):
-        // 1. CATEGORY_AND_PRIORITY: 10000+ (highest)
-        // 2. CUSTOM: 5000 (opportunistic matching)
-        // 3. PRIORITY: 1000-10000 (user priority)
-        // 4. CATEGORY: 100-1000 (user priority, lower than PRIORITY)
-        // 5. BLACKLIST: 50
-        // 6. NONE (General): -500 (second to last)
-        // 7. OVERFLOW: -1000 (always last)
-
-        switch (filterMode) {
-            case CATEGORY_AND_PRIORITY -> {
-                // Highest priority with category filter
-                this.hiddenPriority = 10000 + (priority * 100);
-            }
-            case CUSTOM -> {
-                // Custom chests - mid-high priority for opportunistic matching
-                this.hiddenPriority = 5000;
-            }
-            case PRIORITY -> {
-                // Priority-based routing (user priority 1-10 maps to 1000-10000)
-                this.hiddenPriority = priority * 1000;
-            }
-            case CATEGORY -> {
-                // Category filter with lower priority than PRIORITY
-                this.hiddenPriority = priority * 100;
-            }
-            case BLACKLIST -> {
-                // Blacklist mode
-                this.hiddenPriority = 50;
-            }
-            case NONE -> {
-                // General storage - second to last
-                this.hiddenPriority = -500;
-            }
-            case OVERFLOW -> {
-                // Overflow - always last
-                this.hiddenPriority = -1000;
-            }
-        }
+        this.hiddenPriority = calculateHiddenPriority();
     }
 
-    public NbtCompound toNbt() {
-        NbtCompound nbt = new NbtCompound();
+    public CompoundTag toNbt() {
+        CompoundTag nbt = new CompoundTag();
         nbt.putLong("pos", position.asLong());
         nbt.putString("name", customName);
         nbt.putString("category", filterCategory.asString());
@@ -316,62 +288,34 @@ public class ChestConfig {
         return nbt;
     }
 
-    public static ChestConfig fromNbt(NbtCompound nbt) {
-        //? if >=1.21.8 {
-        BlockPos pos = BlockPos.fromLong(nbt.getLong("pos").orElse(0L));
-        String name = nbt.getString("name", "");
-        Category category = CategoryManager.getInstance().getCategory(nbt.getString("category", "smartsorter:all"));
+    public static ChestConfig fromNbt(CompoundTag nbt) {
+        BlockPos pos = BlockPos.of(nbt.getLong("pos").orElse(0L));
+        String name = nbt.getStringOr("name", "");
+        Category category = CategoryManager.getInstance().getCategory(nbt.getStringOr("category", "smartsorter:all"));
 
         // Migration: Check if old format (string) exists
         int priority;
         if (nbt.contains("priorityLevel")) {
             // Old format - convert
-            String oldPriority = nbt.getString("priorityLevel", "MEDIUM");
+            String oldPriority = nbt.getStringOr("priorityLevel", "MEDIUM");
             priority = switch (oldPriority) {
                 case "HIGH" -> 1;
                 case "LOW" -> 3;
                 default -> 2; // MEDIUM
             };
         } else {
-            priority = nbt.getInt("priority", 1);
+            priority = nbt.getIntOr("priority", 1);
         }
 
-        FilterMode mode = FilterMode.valueOf(nbt.getString("filterMode", "NONE"));
-        boolean autoFrame = nbt.getBoolean("autoItemFrame", false);
-        boolean strictNBT = nbt.getBoolean("strictNBT", false);
-        int cachedFull = nbt.getInt("cachedFullness", -1);
-        //?} else {
-    /*BlockPos pos = BlockPos.fromLong(nbt.getLong("pos"));
-    String name = nbt.contains("name") ? nbt.getString("name") : "";
-    String categoryStr = nbt.contains("category") ? nbt.getString("category") : "smartsorter:all";
-    Category category = CategoryManager.getInstance().getCategory(categoryStr);
-
-    // Migration: Check if old format (string) exists
-    int priority;
-    if (nbt.contains("priorityLevel")) {
-        // Old format - convert
-        String oldPriority = nbt.getString("priorityLevel");
-        priority = switch (oldPriority) {
-            case "HIGH" -> 1;
-            case "LOW" -> 3;
-            default -> 2; // MEDIUM
-        };
-    } else {
-        priority = nbt.contains("priority") ? nbt.getInt("priority") : 1;
-    }
-
-    String modeStr = nbt.contains("filterMode") ? nbt.getString("filterMode") : "NONE";
-    FilterMode mode = FilterMode.valueOf(modeStr);
-    boolean autoFrame = nbt.contains("autoItemFrame") && nbt.getBoolean("autoItemFrame");
-    boolean strictNBT = nbt.contains("strictNBT") && nbt.getBoolean("strictNBT");
-    int cachedFull = nbt.contains("cachedFullness") ? nbt.getInt("cachedFullness") : -1;
-    *///?}
+        FilterMode mode = FilterMode.valueOf(nbt.getStringOr("filterMode", "NONE"));
+        boolean autoFrame = nbt.getBooleanOr("autoItemFrame", false);
+        boolean strictNBT = nbt.getBooleanOr("strictNBT", false);
+        int cachedFull = nbt.getIntOr("cachedFullness", -1);
 
         ChestConfig config = new ChestConfig(pos, name, category, priority, mode, autoFrame);
         config.strictNBTMatch = strictNBT;
         config.cachedFullness = cachedFull;
 
-        //? if >=1.21.8 {
         // Load SimplePriority selection
         if (nbt.contains("simplePrioritySelection")) {
             nbt.getString("simplePrioritySelection").ifPresent(str -> {
@@ -382,18 +326,6 @@ public class ChestConfig {
                 }
             });
         }
-        //?} else {
-        /*// Load SimplePriority selection
-        if (nbt.contains("simplePrioritySelection")) {
-            try {
-                config.simplePrioritySelection = SimplePriority.valueOf(
-                    nbt.getString("simplePrioritySelection")
-                );
-            } catch (Exception e) {
-                config.simplePrioritySelection = SimplePriority.MEDIUM;
-            }
-        }
-        *///?}
 
         return config;
     }

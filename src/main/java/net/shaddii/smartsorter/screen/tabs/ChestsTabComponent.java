@@ -1,11 +1,10 @@
 package net.shaddii.smartsorter.screen.tabs;
 
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.shaddii.smartsorter.network.SortChestsPayload;
 import net.shaddii.smartsorter.screen.StorageControllerScreen;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
@@ -21,7 +20,7 @@ import java.util.stream.Collectors;
 public class ChestsTabComponent extends TabComponent {
     private ChestSelectorWidget chestSelector;
     private ChestConfigPanel chestConfigPanel;
-    private ButtonWidget sortAllButton;
+    private Button sortAllButton;
     private DropdownWidget chestSortDropdown;
 
     private BlockPos lastSelectedChestPos = null;
@@ -35,14 +34,14 @@ public class ChestsTabComponent extends TabComponent {
     @Override
     protected void initWidgets() {
         // Sort All button - use parent.addWidget() instead of parent.addDrawableChild()
-        sortAllButton = ButtonWidget.builder(
-                Text.literal("Sort All"),
+        sortAllButton = Button.builder(
+                Component.literal("Sort All"),
                 btn -> handleSortAllChests()
-        ).dimensions(guiX + 75, guiY + 4, 30, 12).build();
+        ).bounds(guiX + 75, guiY + 4, 30, 12).build();
         parent.addWidget(sortAllButton);  // Use addWidget
 
         // Sort mode dropdown
-        chestSortDropdown = new DropdownWidget(guiX + 75 + 30 + 2, guiY + 4, 55, 12, Text.literal(""));
+        chestSortDropdown = new DropdownWidget(guiX + 75 + 30 + 2, guiY + 4, 55, 12, Component.literal(""));
         initSortDropdown();
         parent.addWidget(chestSortDropdown);  // Use addWidget
 
@@ -79,7 +78,7 @@ public class ChestsTabComponent extends TabComponent {
         chestSelector = new ChestSelectorWidget(
                 guiX + 8, guiY + 18,
                 backgroundWidth - 16, 10,
-                parent.getTextRenderer(), parent  // Use parent.getTextRenderer()
+                parent.getFont(), parent  // Use parent.getTextRenderer()
         );
 
         Map<BlockPos, ChestConfig> configs = handler.getChestConfigs();
@@ -109,7 +108,7 @@ public class ChestsTabComponent extends TabComponent {
         chestConfigPanel = new ChestConfigPanel(
                 guiX + 8, guiY + 30,
                 backgroundWidth - 16, 75,
-                parent.getTextRenderer()
+                parent.getFont()
         );
 
         Map<BlockPos, ChestConfig> configs = handler.getChestConfigs();
@@ -155,16 +154,16 @@ public class ChestsTabComponent extends TabComponent {
     }
 
     @Override
-    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        context.drawText(parent.getTextRenderer(), "Chest Config", guiX + 8, guiY + 6, 0xFF404040, false);
+    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+        context.text(parent.getFont(), "Chest Config", guiX + 8, guiY + 6, 0xFF404040, false);
 
         if (chestSelector != null) {
-            chestSelector.render(context, mouseX, mouseY, delta);
+            chestSelector.extractRenderState(context, mouseX, mouseY, delta);
         }
 
         if (chestConfigPanel != null) {
             chestConfigPanel.setExternalDropdownOpen(chestSelector != null && chestSelector.isDropdownOpen());
-            chestConfigPanel.render(context, mouseX, mouseY, delta);
+            chestConfigPanel.extractRenderState(context, mouseX, mouseY, delta);
         }
 
         // Render floating text
@@ -174,7 +173,7 @@ public class ChestsTabComponent extends TabComponent {
         renderDropdowns(context, mouseX, mouseY);
     }
 
-    private void renderFloatingText(DrawContext context) {
+    private void renderFloatingText(GuiGraphicsExtractor context) {
         long timeSinceSortAll = System.currentTimeMillis() - sortAllClickTime;
         if (timeSinceSortAll < 2000 && sortedChestCount > 0) {
             float alpha = 1.0f - (timeSinceSortAll / 2000.0f);
@@ -182,7 +181,7 @@ public class ChestsTabComponent extends TabComponent {
 
             String sortedText = "✓ Sorted " + sortedChestCount + " chest" + (sortedChestCount > 1 ? "s" : "") + "!";
             float scale = 0.8f;
-            int scaledWidth = (int)(parent.getTextRenderer().getWidth(sortedText) * scale);
+            int scaledWidth = (int)(parent.getFont().width(sortedText) * scale);
             int textX = guiX + backgroundWidth / 2 - scaledWidth / 2;
             int textY = guiY + 108 - yOffset;
 
@@ -193,11 +192,7 @@ public class ChestsTabComponent extends TabComponent {
         }
     }
 
-    private void renderDropdowns(DrawContext context, int mouseX, int mouseY) {
-        //? if <1.21.8 {
-        /*context.getMatrices().push();
-        context.getMatrices().translate(0, 0, 500);
-        *///?}
+    private void renderDropdowns(GuiGraphicsExtractor context, int mouseX, int mouseY) {
 
         if (chestSelector != null) {
             chestSelector.renderDropdownIfOpen(context, mouseX, mouseY);
@@ -209,33 +204,30 @@ public class ChestsTabComponent extends TabComponent {
             chestConfigPanel.renderDropdownsOnly(context, mouseX, mouseY);
         }
 
-        //? if <1.21.8 {
-        /*context.getMatrices().pop();
-         *///?}
     }
 
-    public void renderTooltips(DrawContext context, int mouseX, int mouseY) {
+    public void renderTooltips(GuiGraphicsExtractor context, int mouseX, int mouseY) {
         if (!parent.isShiftDown()) return;
 
         // Sort All button tooltip
         if (sortAllButton != null && sortAllButton.isMouseOver(mouseX, mouseY)) {
-            List<Text> tooltip = Arrays.asList(
-                    Text.literal("§6Sort All Chests"),
-                    Text.literal("§7Moves all items from every"),
-                    Text.literal("§7chest into the network")
+            List<Component> tooltip = Arrays.asList(
+                    Component.literal("§6Sort All Chests"),
+                    Component.literal("§7Moves all items from every"),
+                    Component.literal("§7chest into the network")
             );
-            context.drawTooltip(parent.getTextRenderer(), tooltip, mouseX, mouseY);
+            context.setComponentTooltipForNextFrame(parent.getFont(), tooltip, mouseX, mouseY);
             return;
         }
 
         // Sort dropdown tooltip
         if (chestSortDropdown != null && chestSortDropdown.isMouseOver(mouseX, mouseY)) {
-            List<Text> tooltip = Arrays.asList(
-                    Text.literal("§6Sort Order"),
-                    Text.literal("§7Changes how chests are"),
-                    Text.literal("§7ordered in the list")
+            List<Component> tooltip = Arrays.asList(
+                    Component.literal("§6Sort Order"),
+                    Component.literal("§7Changes how chests are"),
+                    Component.literal("§7ordered in the list")
             );
-            context.drawTooltip(parent.getTextRenderer(), tooltip, mouseX, mouseY);
+            context.setComponentTooltipForNextFrame(parent.getFont(), tooltip, mouseX, mouseY);
         }
     }
 

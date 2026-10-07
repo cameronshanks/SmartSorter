@@ -4,7 +4,7 @@ import java.util.List;
 
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.level.ServerPlayer;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 import net.shaddii.smartsorter.screen.OutputProbeScreenHandler;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
@@ -27,11 +27,11 @@ public final class WhitelistBroadcast {
         if (server == null) {
             return;
         }
-        List<ServerPlayerEntity> players = server.getPlayerManager().getPlayerList();
-        for (ServerPlayerEntity viewer : players) {
-            if (viewer.currentScreenHandler instanceof StorageControllerScreenHandler handler && handler.controller == controller) {
+        List<ServerPlayer> players = server.getPlayerList().getPlayers();
+        for (ServerPlayer viewer : players) {
+            if (viewer.containerMenu instanceof StorageControllerScreenHandler handler && handler.controller == controller) {
                 ServerPlayNetworking.send(viewer, payload);
-            } else if (viewer.currentScreenHandler instanceof OutputProbeScreenHandler probeHandler
+            } else if (viewer.containerMenu instanceof OutputProbeScreenHandler probeHandler
                     && payload.position().equals(probeHandler.chestPos)) {
                 ServerPlayNetworking.send(viewer, payload);
             }

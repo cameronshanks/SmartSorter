@@ -1,11 +1,11 @@
 package net.shaddii.smartsorter.network;
 
-import net.minecraft.item.ItemStack;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.ItemStack;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.util.Category;
 import net.shaddii.smartsorter.util.CategoryManager;
@@ -16,30 +16,30 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public record ChestConfigBatchPayload(Map<BlockPos, ChestConfig> configs) implements CustomPayload {
+public record ChestConfigBatchPayload(Map<BlockPos, ChestConfig> configs) implements CustomPacketPayload {
 
-    public static final Id<ChestConfigBatchPayload> ID =
-            new Id<>(Identifier.of(SmartSorter.MOD_ID, "chest_config_batch"));
+    public static final Type<ChestConfigBatchPayload> ID =
+            new Type<>(Identifier.fromNamespaceAndPath(SmartSorter.MOD_ID, "chest_config_batch"));
 
-    public static final PacketCodec<RegistryByteBuf, ChestConfigBatchPayload> CODEC =
-            new PacketCodec<>() {
+    public static final StreamCodec<RegistryFriendlyByteBuf, ChestConfigBatchPayload> CODEC =
+            new StreamCodec<>() {
                 @Override
-                public ChestConfigBatchPayload decode(RegistryByteBuf buf) {
+                public ChestConfigBatchPayload decode(RegistryFriendlyByteBuf buf) {
                     return ChestConfigBatchPayload.read(buf);
                 }
 
                 @Override
-                public void encode(RegistryByteBuf buf, ChestConfigBatchPayload payload) {
+                public void encode(RegistryFriendlyByteBuf buf, ChestConfigBatchPayload payload) {
                     ChestConfigBatchPayload.write(buf, payload);
                 }
             };
 
     @Override
-    public Id<? extends CustomPayload> getId() {
+    public Type<? extends CustomPacketPayload> type() {
         return ID;
     }
 
-    public static void write(RegistryByteBuf buf, ChestConfigBatchPayload payload) {
+    public static void write(RegistryFriendlyByteBuf buf, ChestConfigBatchPayload payload) {
         buf.writeVarInt(payload.configs.size());
 
         for (Map.Entry<BlockPos, ChestConfig> entry : payload.configs.entrySet()) {
@@ -49,16 +49,16 @@ public record ChestConfigBatchPayload(Map<BlockPos, ChestConfig> configs) implem
             buf.writeBlockPos(config.position);
 
             // Write custom name
-            buf.writeString(config.customName != null ? config.customName : "");
+            buf.writeUtf(config.customName != null ? config.customName : "");
 
             // Write filter category
-            buf.writeString(config.filterCategory.asString());
+            buf.writeUtf(config.filterCategory.asString());
 
             // Write priority
             buf.writeVarInt(config.priority);
 
             // Write filter mode
-            buf.writeString(config.filterMode.name());
+            buf.writeUtf(config.filterMode.name());
 
             // Write auto item frame
             buf.writeBoolean(config.autoItemFrame);
@@ -72,7 +72,7 @@ public record ChestConfigBatchPayload(Map<BlockPos, ChestConfig> configs) implem
             // ✅ FIX: Write SimplePriority
             if (config.simplePrioritySelection != null) {
                 buf.writeBoolean(true); // Has SimplePriority
-                buf.writeString(config.simplePrioritySelection.name());
+                buf.writeUtf(config.simplePrioritySelection.name());
             } else {
                 buf.writeBoolean(false); // No SimplePriority
             }
@@ -80,12 +80,12 @@ public record ChestConfigBatchPayload(Map<BlockPos, ChestConfig> configs) implem
             // Preview Items
             buf.writeVarInt(config.previewItems.size());
             for (ItemStack stack : config.previewItems) {
-                ItemStack.PACKET_CODEC.encode(buf, stack);
+                ItemStack.STREAM_CODEC.encode(buf, stack);
             }
         }
     }
 
-    public static ChestConfigBatchPayload read(RegistryByteBuf buf) {
+    public static ChestConfigBatchPayload read(RegistryFriendlyByteBuf buf) {
         int size = buf.readVarInt();
         Map<BlockPos, ChestConfig> configs = new HashMap<>(size);
 
@@ -94,17 +94,17 @@ public record ChestConfigBatchPayload(Map<BlockPos, ChestConfig> configs) implem
             BlockPos position = buf.readBlockPos();
 
             // Read custom name
-            String customName = buf.readString();
+            String customName = buf.readUtf();
 
             // Read filter category
-            String categoryStr = buf.readString();
+            String categoryStr = buf.readUtf();
             Category category = CategoryManager.getInstance().getCategory(categoryStr);
 
             // Read priority
             int priority = buf.readVarInt();
 
             // Read filter mode
-            String modeStr = buf.readString();
+            String modeStr = buf.readUtf();
             ChestConfig.FilterMode mode = ChestConfig.FilterMode.valueOf(modeStr);
 
             // Read auto item frame
@@ -119,7 +119,7 @@ public record ChestConfigBatchPayload(Map<BlockPos, ChestConfig> configs) implem
             ChestConfig.SimplePriority simplePriority = null;
             boolean hasSimplePriority = buf.readBoolean();
             if (hasSimplePriority) {
-                String simplePriorityStr = buf.readString();
+                String simplePriorityStr = buf.readUtf();
                 try {
                     simplePriority = ChestConfig.SimplePriority.valueOf(simplePriorityStr);
                 } catch (IllegalArgumentException e) {
@@ -133,7 +133,7 @@ public record ChestConfigBatchPayload(Map<BlockPos, ChestConfig> configs) implem
             int previewSize = buf.readVarInt();
             List<ItemStack> previewItems = new ArrayList<>();
             for (int j = 0; j < previewSize; j++) {
-                previewItems.add(ItemStack.PACKET_CODEC.decode(buf));
+                previewItems.add(ItemStack.STREAM_CODEC.decode(buf));
             }
 
             ChestConfig config = new ChestConfig(position, customName, category, priority, mode, autoItemFrame);

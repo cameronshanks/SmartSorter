@@ -1,21 +1,21 @@
 package net.shaddii.smartsorter.network;
 
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 import net.shaddii.smartsorter.SmartSorter;
 
 public record SortProgressPayload(
         int current,
         int total,
         boolean isComplete
-) implements CustomPayload {
+) implements CustomPacketPayload {
 
-    public static final Id<SortProgressPayload> ID =
-            new Id<>(Identifier.of(SmartSorter.MOD_ID, "sort_progress"));
+    public static final Type<SortProgressPayload> ID =
+            new Type<>(Identifier.fromNamespaceAndPath(SmartSorter.MOD_ID, "sort_progress"));
 
-    public static final PacketCodec<RegistryByteBuf, SortProgressPayload> CODEC = PacketCodec.of(
+    public static final StreamCodec<RegistryFriendlyByteBuf, SortProgressPayload> CODEC = StreamCodec.ofMember(
             (payload, buf) -> {
                 buf.writeInt(payload.current);
                 buf.writeInt(payload.total);
@@ -30,7 +30,7 @@ public record SortProgressPayload(
     );
 
     @Override
-    public Id<? extends CustomPayload> getId() {
+    public Type<? extends CustomPacketPayload> type() {
         return ID;
     }
 }

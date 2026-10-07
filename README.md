@@ -72,19 +72,21 @@ The Intake Block now skips items that cannot currently be routed to a valid dest
 ```
 [Input Chest] → [Intake Block] … [Output Probe] → [Target Chest]
 ```
-1. Place the Intake Block beside the input chest.
-2. Place the Output Probe beside the target chest.
+1. Place the Intake Block beside the input chest (sneak while placing against a chest, so the chest doesn't open).
+2. Place the Output Probe beside the target chest the same way.
 3. Right-click the Intake Block with the Linking Tool.
 4. Right-click the Output Probe to link the two components.
-5. Right-click the Output Probe to configure its item filters.
+5. Right-click the Output Probe with an empty hand to configure its item filters.
 
 ### 2. Controller-based storage network
 
 1. Place a Storage Controller.
-2. Shift-click the controller with the Linking Tool.
-3. Click your Intake Blocks, Output Probes, and Process Probes.
+2. Right-click the controller with the Linking Tool to select it.
+3. Right-click your Intake Blocks, Output Probes, and Process Probes to link them.
 4. Open the controller to search the network and configure storage priorities.
 5. Use dedicated output probes and custom whitelists for items that need precise routing.
+
+**Tips:** With the Linking Tool, sneak + right-click (a block or the air) clears your selection. With an empty hand, sneak + right-click an Output Probe to see which filter it's using.
 
 ### 3. Redstone-powered processing
 

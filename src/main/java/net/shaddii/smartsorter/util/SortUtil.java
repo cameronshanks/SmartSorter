@@ -3,13 +3,12 @@ package net.shaddii.smartsorter.util;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
 import net.fabricmc.fabric.api.transfer.v1.storage.Storage;
 import net.fabricmc.fabric.api.transfer.v1.storage.StorageView;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.registry.tag.TagKey;
-
+import net.minecraft.core.Holder;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import java.util.*;
 
 public final class SortUtil {
@@ -74,13 +73,13 @@ public final class SortUtil {
     /**
      * Check tags against a specific inventory (not a Storage)
      */
-    public static boolean acceptsByInventoryTags(Inventory inv, ItemVariant incoming, boolean requireAll) {
+    public static boolean acceptsByInventoryTags(Container inv, ItemVariant incoming, boolean requireAll) {
         Set<TagKey<Item>> incomingTags = tagsOf(incoming.getItem());
         if (incomingTags.isEmpty()) return false;
 
         Set<TagKey<Item>> chestTags = new HashSet<>();
-        for (int i = 0; i < inv.size(); i++) {
-            ItemStack stack = inv.getStack(i);
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            ItemStack stack = inv.getItem(i);
             if (stack.isEmpty()) continue;
             chestTags.addAll(tagsOf(stack.getItem()));
         }
@@ -119,9 +118,9 @@ public final class SortUtil {
         }
 
         // Cache miss - compute tags
-        RegistryEntry<Item> entry = Registries.ITEM.getEntry(item);
+        Holder<Item> entry = BuiltInRegistries.ITEM.wrapAsHolder(item);
         Set<TagKey<Item>> tags = new HashSet<>();
-        entry.streamTags().forEach(tags::add);
+        entry.tags().forEach(tags::add);
 
         TAG_CACHE.put(item, new CacheEntry(tags));
         return tags;

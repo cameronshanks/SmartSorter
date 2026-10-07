@@ -1,20 +1,20 @@
 package net.shaddii.smartsorter.blockentity.processor;
 
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
-import net.minecraft.block.entity.AbstractFurnaceBlockEntity;
-import net.minecraft.block.entity.BlastFurnaceBlockEntity;
-import net.minecraft.block.entity.FurnaceBlockEntity;
-import net.minecraft.block.entity.SmokerBlockEntity;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.recipe.BlastingRecipe;
-import net.minecraft.recipe.RecipeType;
-import net.minecraft.recipe.SmeltingRecipe;
-import net.minecraft.recipe.SmokingRecipe;
-import net.minecraft.recipe.input.SingleStackRecipeInput;
-import net.minecraft.registry.Registries;
-import net.minecraft.server.world.ServerWorld;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.BlastingRecipe;
+import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraft.world.item.crafting.SingleRecipeInput;
+import net.minecraft.world.item.crafting.SmeltingRecipe;
+import net.minecraft.world.item.crafting.SmokingRecipe;
+import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
+import net.minecraft.world.level.block.entity.BlastFurnaceBlockEntity;
+import net.minecraft.world.level.block.entity.FurnaceBlockEntity;
+import net.minecraft.world.level.block.entity.SmokerBlockEntity;
 import net.shaddii.smartsorter.util.FuelFilterMode;
 import net.shaddii.smartsorter.util.RecipeFilterMode;
 
@@ -74,7 +74,7 @@ public class RecipeValidator {
      * Checks if an item can be smelted in the given furnace.
      * Results are cached for performance.
      */
-    public boolean canSmelt(ServerWorld world, ItemVariant variant,
+    public boolean canSmelt(ServerLevel world, ItemVariant variant,
                             AbstractFurnaceBlockEntity furnace, RecipeType<?> recipeType) {
         if (recipeType == null) return false;
 
@@ -89,21 +89,21 @@ public class RecipeValidator {
 
         // Check recipe
         ItemStack stack = variant.toStack(1);
-        SingleStackRecipeInput recipeInput = new SingleStackRecipeInput(stack);
+        SingleRecipeInput recipeInput = new SingleRecipeInput(stack);
 
         boolean canSmelt = false;
         try {
             if (furnace instanceof FurnaceBlockEntity) {
-                canSmelt = world.getRecipeManager()
-                        .getFirstMatch((RecipeType<SmeltingRecipe>) RecipeType.SMELTING, recipeInput, world)
+                canSmelt = world.recipeAccess()
+                        .getRecipeFor((RecipeType<SmeltingRecipe>) RecipeType.SMELTING, recipeInput, world)
                         .isPresent();
             } else if (furnace instanceof BlastFurnaceBlockEntity) {
-                canSmelt = world.getRecipeManager()
-                        .getFirstMatch((RecipeType<BlastingRecipe>) RecipeType.BLASTING, recipeInput, world)
+                canSmelt = world.recipeAccess()
+                        .getRecipeFor((RecipeType<BlastingRecipe>) RecipeType.BLASTING, recipeInput, world)
                         .isPresent();
             } else if (furnace instanceof SmokerBlockEntity) {
-                canSmelt = world.getRecipeManager()
-                        .getFirstMatch((RecipeType<SmokingRecipe>) RecipeType.SMOKING, recipeInput, world)
+                canSmelt = world.recipeAccess()
+                        .getRecipeFor((RecipeType<SmokingRecipe>) RecipeType.SMOKING, recipeInput, world)
                         .isPresent();
             }
         } catch (Exception e) {
@@ -125,17 +125,13 @@ public class RecipeValidator {
      * Checks if an item is fuel.
      * Results are permanently cached until clear.
      */
-    public boolean isFuel(ServerWorld world, ItemVariant variant) {
+    public boolean isFuel(ServerLevel world, ItemVariant variant) {
         if (knownFuels.contains(variant)) return true;
         if (knownNonFuels.contains(variant)) return false;
 
         ItemStack stack = variant.toStack(1);
 
-        //? if >= 1.21.8 {
-        boolean isFuel = world.getFuelRegistry().isFuel(stack);
-        //?} else {
-        /*boolean isFuel = AbstractFurnaceBlockEntity.canUseAsFuel(stack);
-         *///?}
+        boolean isFuel = world.fuelValues().isFuel(stack);
 
         (isFuel ? knownFuels : knownNonFuels).add(variant);
 
@@ -153,13 +149,13 @@ public class RecipeValidator {
     public boolean matchesRecipeFilter(ItemVariant variant, RecipeFilterMode filter) {
         ItemStack stack = variant.toStack(1);
         Item item = variant.getItem();
-        String id = Registries.ITEM.getId(item).getPath();
+        String id = BuiltInRegistries.ITEM.getKey(item).getPath();
 
         return switch (filter) {
             case ALL_SMELTABLE -> true;
             case ORES_ONLY -> id.contains("ore") || id.contains("raw_");
-            case FOOD_ONLY -> stack.getComponents().contains(
-                    net.minecraft.component.DataComponentTypes.FOOD);
+            case FOOD_ONLY -> stack.getComponents().has(
+                    net.minecraft.core.component.DataComponents.FOOD);
             case RAW_METALS_ONLY -> id.startsWith("raw_");
             case NO_WOOD -> !id.contains("log") && !id.contains("wood") && !id.contains("plank");
             case CUSTOM -> false;
@@ -172,7 +168,7 @@ public class RecipeValidator {
      */
     public boolean matchesFuelFilter(ItemVariant variant, FuelFilterMode filter) {
         Item item = variant.getItem();
-        String id = Registries.ITEM.getId(item).getPath();
+        String id = BuiltInRegistries.ITEM.getKey(item).getPath();
 
         return switch (filter) {
             case ANY_FUEL -> true;

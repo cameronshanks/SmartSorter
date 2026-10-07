@@ -1,8 +1,8 @@
 package net.shaddii.smartsorter.util;
 
-import net.minecraft.util.math.BlockPos;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import net.minecraft.core.BlockPos;
 
 public class ChestPriorityManager {
     private static final int CUSTOM_PRIORITY = 0;

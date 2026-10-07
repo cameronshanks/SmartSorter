@@ -1,21 +1,17 @@
 package net.shaddii.smartsorter.screen;
 
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.ingame.HandledScreen;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.text.Text;
 import net.shaddii.smartsorter.client.ProbeWhitelistPanel;
 import net.shaddii.smartsorter.util.ChestConfig;
 import net.shaddii.smartsorter.widget.ChestConfigPanel;
-
-//? if >= 1.21.9 {
-import net.minecraft.client.input.KeyInput;
-import net.minecraft.client.input.CharInput;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents;
-//?}
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.client.input.CharacterEvent;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.player.Inventory;
 
-public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
+public class OutputProbeScreen extends AbstractContainerScreen<OutputProbeScreenHandler> {
     // ========================================
     // FIELDS
     // ========================================
@@ -29,18 +25,15 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
     // CONSTRUCTOR
     // ========================================
 
-    public OutputProbeScreen(OutputProbeScreenHandler handler, PlayerInventory inventory, Text title) {
-        super(handler, inventory, title);
-
+    public OutputProbeScreen(OutputProbeScreenHandler handler, Inventory inventory, Component title) {
         // Smaller GUI - just for config panel
-        this.backgroundWidth = 180;
-        this.backgroundHeight = 140;
+        super(handler, inventory, title, 180, 140);
 
-        this.titleX = 8;
-        this.titleY = 6;
+        this.titleLabelX = 8;
+        this.titleLabelY = 6;
 
         // Hide player inventory title
-        this.playerInventoryTitleY = 10000; // Move off-screen
+        this.inventoryLabelY = 10000; // Move off-screen
     }
 
     // ========================================
@@ -51,19 +44,19 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
     protected void init() {
         super.init();
 
-        int x = (width - backgroundWidth) / 2;
-        int y = (height - backgroundHeight) / 2;
+        int x = (width - imageWidth) / 2;
+        int y = (height - imageHeight) / 2;
 
         // Chest config panel - disable header (no "Chest Config" text or coordinates)
         configPanel = new ChestConfigPanel(
                 x + 8, y + 18,
-                backgroundWidth - 16, backgroundHeight - 26,
-                textRenderer,
+                imageWidth - 16, imageHeight - 26,
+                font,
                 true,
                 false
         );
 
-        ChestConfig config = handler.getChestConfig();
+        ChestConfig config = menu.getChestConfig();
         if (config != null) {
             configPanel.setConfig(config);
             // Set max priority based on total chests in network
@@ -71,17 +64,16 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
         }
 
         configPanel.setOnConfigUpdate(updatedConfig -> {
-            handler.updateChestConfig(updatedConfig);
+            menu.updateChestConfig(updatedConfig);
         });
 
-        addDrawableChild(configPanel);
+        addRenderableWidget(configPanel);
 
         // Whitelist buttons, left of the GUI (only visible for Custom chests)
-        whitelistPanel = new ProbeWhitelistPanel(handler, Math.max(2, x - 122), y + 18);
-        addDrawableChild(whitelistPanel.sortingButton());
-        addDrawableChild(whitelistPanel.editingButton());
+        whitelistPanel = new ProbeWhitelistPanel(menu, Math.max(2, x - 122), y + 18);
+        addRenderableWidget(whitelistPanel.sortingButton());
+        addRenderableWidget(whitelistPanel.editingButton());
 
-        //? if >= 1.21.9 {
         // Register mouse events for 1.21.9+
         ScreenMouseEvents.allowMouseClick(this).register((screen, click) -> {
             if (!(screen instanceof OutputProbeScreen gui)) return true;
@@ -91,7 +83,6 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
             }
             return true;
         });
-        //?}
     }
 
     // ========================================
@@ -110,79 +101,57 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
         return dropdownOpenCache;
     }
 
-    //? if <1.21.8 {
-    /*private void renderSlot(DrawContext context, net.minecraft.screen.slot.Slot slot) {
-        int slotX = slot.x;
-        int slotY = slot.y;
-        ItemStack itemStack = slot.getStack();
-
-        // Draw slot background
-        context.fill(slotX - 1, slotY - 1, slotX + 17, slotY + 17, 0xFF8B8B8B);
-        context.fill(slotX, slotY, slotX + 16, slotY + 16, 0xFF373737);
-
-        if (!itemStack.isEmpty()) {
-            context.drawItem(itemStack, slotX, slotY);
-            context.drawItemInSlot(this.textRenderer, itemStack, slotX, slotY);
-        }
-    }
-    *///?}
 
     // ========================================
     // RENDERING
     // ========================================
 
     @Override
-    protected void drawBackground(DrawContext context, float delta, int mouseX, int mouseY) {
-        int x = (width - backgroundWidth) / 2;
-        int y = (height - backgroundHeight) / 2;
+    public void extractBackground(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+        super.extractBackground(context, mouseX, mouseY, delta);
+
+        int x = (width - imageWidth) / 2;
+        int y = (height - imageHeight) / 2;
 
         // Main background
-        context.fill(x, y, x + backgroundWidth, y + backgroundHeight, 0xFF2B2B2B);
-        context.fill(x + 1, y + 1, x + backgroundWidth - 1, y + backgroundHeight - 1, 0xFF3C3C3C);
+        context.fill(x, y, x + imageWidth, y + imageHeight, 0xFF2B2B2B);
+        context.fill(x + 1, y + 1, x + imageWidth - 1, y + imageHeight - 1, 0xFF3C3C3C);
     }
 
     @Override
-    protected void drawForeground(DrawContext context, int mouseX, int mouseY) {
+    protected void extractLabels(GuiGraphicsExtractor context, int mouseX, int mouseY) {
         // Title
-        context.drawText(textRenderer, Text.literal("Chest Configuration"), titleX, titleY, 0xFFFFFFFF, false);
+        context.text(font, Component.literal("Chest Configuration"), titleLabelX, titleLabelY, 0xFFFFFFFF, false);
     }
 
     @Override
-    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
         boolean dropdownOpen = isAnyDropdownOpen();
 
         // Calculate GUI position
-        int guiX = (width - backgroundWidth) / 2;
-        int guiY = (height - backgroundHeight) / 2;
+        int guiX = (width - imageWidth) / 2;
+        int guiY = (height - imageHeight) / 2;
 
-        // 1. Background
-        this.renderBackground(context, mouseX, mouseY, delta);
-        drawBackground(context, delta, mouseX, mouseY);
+        // 1. Background is drawn by extractBackground() before this method runs
 
         // 2. Title (NO TRANSLATION - draw at absolute position)
-        context.drawText(textRenderer, Text.literal("Chest Configuration"),
-                guiX + titleX, guiY + titleY, 0xFFFFFFFF, false);
+        context.text(font, Component.literal("Chest Configuration"),
+                guiX + titleLabelX, guiY + titleLabelY, 0xFFFFFFFF, false);
 
         // 3. Config panel (already positioned absolutely, no translation needed)
         if (configPanel != null) {
-            configPanel.render(context, mouseX, mouseY, delta);
+            configPanel.extractRenderState(context, mouseX, mouseY, delta);
         }
 
         // 4. Inventory slots (if dropdown not blocking)
         if (!dropdownOpen) {
-            for (int i = 0; i < this.handler.slots.size(); ++i) {
-                //? if >=1.21.11 {
-                this.drawSlot(context, this.handler.slots.get(i), this.x, this.y);
-                //?} else if >=1.21.8 {
-                /*this.drawSlot(context, this.handler.slots.get(i));
-                 *///?} else {
-                /*this.renderSlot(context, this.handler.slots.get(i));
-                 *///?}
+            for (int i = 0; i < this.menu.slots.size(); ++i) {
+                this.extractSlot(context, this.menu.slots.get(i), mouseX, mouseY);
             }
         }
 
         if (whitelistPanel != null) {
-            whitelistPanel.render(context, mouseX, mouseY, delta);
+            whitelistPanel.extractRenderState(context, mouseX, mouseY, delta);
         }
 
         // 5. Dropdowns (always on top)
@@ -192,12 +161,12 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
 
         // 6. Tooltips (only if no dropdown)
         if (!dropdownOpen) {
-            this.drawMouseoverTooltip(context, mouseX, mouseY);
+            this.extractTooltip(context, mouseX, mouseY);
         }
     }
 
     @Override
-    protected void drawMouseoverTooltip(DrawContext context, int mouseX, int mouseY) {
+    protected void extractTooltip(GuiGraphicsExtractor context, int mouseX, int mouseY) {
         // Block all tooltips when dropdown is open
         if (isAnyDropdownOpen()) {
             return;
@@ -207,21 +176,20 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
     }
 
     @Override
-    protected boolean isPointWithinBounds(int x, int y, int width, int height, double pointX, double pointY) {
+    protected boolean isHovering(int x, int y, int width, int height, double pointX, double pointY) {
         // Block slot interaction when dropdown is open
         if (isAnyDropdownOpen()) {
             return false;
         }
-        return super.isPointWithinBounds(x, y, width, height, pointX, pointY);
+        return super.isHovering(x, y, width, height, pointX, pointY);
     }
 
     // ========================================
     // INPUT HANDLING (VERSION-SPECIFIC)
     // ========================================
 
-    //? if >= 1.21.9 {
     @Override
-    public boolean keyPressed(KeyInput input) {
+    public boolean keyPressed(KeyEvent input) {
         // 1. Let the config panel handle all key inputs first
         if (configPanel != null && configPanel.keyPressed(input)) {
             return true;
@@ -233,7 +201,7 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
         }
 
         // 3. Block inventory key when any widget might be focused
-        if (this.client.options.inventoryKey.matchesKey(input)) {
+        if (this.minecraft.options.keyInventory.matches(input)) {
             return true; // Block closing
         }
 
@@ -241,59 +209,12 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
     }
 
     @Override
-    public boolean charTyped(CharInput input) {
+    public boolean charTyped(CharacterEvent input) {
         if (configPanel != null && configPanel.charTyped(input)) {
             return true;
         }
         return super.charTyped(input);
     }
-    //?} else {
-    /*@Override
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        // 1. Let the config panel handle all key inputs first
-        if (configPanel != null && configPanel.keyPressed(keyCode, scanCode, modifiers)) {
-            return true;
-        }
-
-        // 2. Allow ESC to close
-        if (keyCode == 256) { // ESC key
-            return super.keyPressed(keyCode, scanCode, modifiers);
-        }
-
-        // 3. Block inventory key
-        if (this.client.options.inventoryKey.matchesKey(keyCode, scanCode)) {
-            return true; // Block closing
-        }
-
-        return super.keyPressed(keyCode, scanCode, modifiers);
-    }
-
-    @Override
-    public boolean charTyped(char chr, int modifiers) {
-        if (configPanel != null && configPanel.charTyped(chr, modifiers)) {
-            return true;
-        }
-        return super.charTyped(chr, modifiers);
-    }
-
-    @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        // Block inventory clicks when dropdown is open
-        if (isAnyDropdownOpen()) {
-            if (configPanel != null && configPanel.mouseClicked(mouseX, mouseY, button)) {
-                return true;
-            }
-            // Close dropdown if clicking outside
-            configPanel.closeAllDropdowns();
-            return true;
-        }
-
-        if (configPanel != null && configPanel.mouseClicked(mouseX, mouseY, button)) {
-            return true;
-        }
-        return super.mouseClicked(mouseX, mouseY, button);
-    }
-    *///?}
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
@@ -308,8 +229,8 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
     // ========================================
 
     @Override
-    protected void handledScreenTick() {
-        super.handledScreenTick();
+    protected void containerTick() {
+        super.containerTick();
         if (whitelistPanel != null) {
             whitelistPanel.tick();
         }
@@ -324,7 +245,7 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
      */
     public void refreshConfig() {
         if (configPanel != null) {
-            ChestConfig config = handler.getChestConfig();
+            ChestConfig config = menu.getChestConfig();
             configPanel.setConfig(config);
         }
     }

@@ -1,8 +1,8 @@
 package net.shaddii.smartsorter.client;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.text.Text;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.network.chat.Component;
 
 public class SortProgressOverlay {
     private static int currentProgress = 0;
@@ -23,13 +23,13 @@ public class SortProgressOverlay {
         }
     }
 
-    public static void render(DrawContext context) {
+    public static void render(GuiGraphicsExtractor context) {
         if (!isActive || totalChests == 0) return;
 
-        MinecraftClient client = MinecraftClient.getInstance();
+        Minecraft client = Minecraft.getInstance();
         if (client.player == null) return;
 
-        int screenWidth = client.getWindow().getScaledWidth();
+        int screenWidth = client.getWindow().getGuiScaledWidth();
 
         // ========================================
         // ADJUSTABLE SETTINGS
@@ -87,23 +87,15 @@ public class SortProgressOverlay {
                 ? "✓ Sorted " + totalChests + " chests"
                 : "Sorting " + currentProgress + "/" + totalChests;
 
-        int fullTextWidth = client.textRenderer.getWidth(statusText);
+        int fullTextWidth = client.font.width(statusText);
         int scaledTextWidth = (int)(fullTextWidth * textScale);
         int textX = x + (barWidth - scaledTextWidth) / 2;
         int textY = y + barHeight + textGap;
 
-        //? if >=1.21.8 {
-        context.getMatrices().pushMatrix();
-        context.getMatrices().translate(textX, textY);
-        context.getMatrices().scale(textScale, textScale);
-        context.drawText(client.textRenderer, Text.literal(statusText), 0, 0, 0xFFFFFFFF | alphaInt, true);
-        context.getMatrices().popMatrix();
-        //?} else {
-        /*context.getMatrices().push();
-        context.getMatrices().translate(textX, textY, 0);
-        context.getMatrices().scale(textScale, textScale, textScale);
-        context.drawText(client.textRenderer, Text.literal(statusText), 0, 0, 0xFFFFFFFF | alphaInt, true);
-        context.getMatrices().pop();
-        *///?}
+        context.pose().pushMatrix();
+        context.pose().translate(textX, textY);
+        context.pose().scale(textScale, textScale);
+        context.text(client.font, Component.literal(statusText), 0, 0, 0xFFFFFFFF | alphaInt, true);
+        context.pose().popMatrix();
     }
 }

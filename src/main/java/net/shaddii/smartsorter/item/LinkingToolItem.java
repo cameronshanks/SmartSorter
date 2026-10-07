@@ -1,14 +1,13 @@
 package net.shaddii.smartsorter.item;
 
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.ItemUsageContext;
-import net.minecraft.text.Text;
-import net.minecraft.util.ActionResult;
-import net.minecraft.util.Formatting;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
+import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.context.UseOnContext;
+import net.minecraft.world.level.Level;
 import net.shaddii.smartsorter.block.IntakeBlock;
 import net.shaddii.smartsorter.block.OutputProbeBlock;
 import net.shaddii.smartsorter.block.ProcessProbeBlock;
@@ -31,11 +30,20 @@ public class LinkingToolItem extends Item {
     private static final Map<UUID, BlockPos> STORED_CONTROLLER = new HashMap<>();
     private static final Map<UUID, BlockPos> STORED_INTAKE = new HashMap<>();
 
+    /**
+     * Forget a player's selection. Positions carry no dimension, so a
+     * selection must not outlive the world or dimension it was made in.
+     */
+    public static void clearSelection(UUID playerId) {
+        STORED_CONTROLLER.remove(playerId);
+        STORED_INTAKE.remove(playerId);
+    }
+
     // ========================================
     // CONSTRUCTOR
     // ========================================
 
-    public LinkingToolItem(Settings settings) {
+    public LinkingToolItem(Properties settings) {
         super(settings);
     }
 
@@ -43,65 +51,40 @@ public class LinkingToolItem extends Item {
     // USE IN AIR (VERSION-SPECIFIC)
     // ========================================
 
-    //? if >=1.21.8 {
     @Override
-    public ActionResult use(World world, PlayerEntity player, net.minecraft.util.Hand hand) {
-        if (player.isSneaking()) {
-            if (!world.isClient()) {
-                boolean hadController = STORED_CONTROLLER.remove(player.getUuid()) != null;
-                boolean hadIntake = STORED_INTAKE.remove(player.getUuid()) != null;
+    public InteractionResult use(Level world, Player player, net.minecraft.world.InteractionHand hand) {
+        if (player.isShiftKeyDown()) {
+            if (!world.isClientSide()) {
+                boolean hadController = STORED_CONTROLLER.remove(player.getUUID()) != null;
+                boolean hadIntake = STORED_INTAKE.remove(player.getUUID()) != null;
 
                 if (hadController && hadIntake) {
-                    player.sendMessage(Text.literal("§eCleared controller + intake selection").formatted(Formatting.YELLOW), true);
+                    player.sendOverlayMessage(Component.literal("§eCleared controller + intake selection").withStyle(ChatFormatting.YELLOW));
                 } else if (hadController) {
-                    player.sendMessage(Text.literal("§eCleared controller selection").formatted(Formatting.YELLOW), true);
+                    player.sendOverlayMessage(Component.literal("§eCleared controller selection").withStyle(ChatFormatting.YELLOW));
                 } else if (hadIntake) {
-                    player.sendMessage(Text.literal("§eCleared intake selection").formatted(Formatting.YELLOW), true);
+                    player.sendOverlayMessage(Component.literal("§eCleared intake selection").withStyle(ChatFormatting.YELLOW));
                 } else {
-                    player.sendMessage(Text.literal("§7Nothing to clear").formatted(Formatting.GRAY), true);
+                    player.sendOverlayMessage(Component.literal("§7Nothing to clear").withStyle(ChatFormatting.GRAY));
                 }
             }
 
-            return ActionResult.SUCCESS;
+            return InteractionResult.SUCCESS;
         }
-        return ActionResult.PASS;
+        return InteractionResult.PASS;
     }
-    //?} else {
-    /*@Override
-    public net.minecraft.util.TypedActionResult<ItemStack> use(World world, PlayerEntity player, net.minecraft.util.Hand hand) {
-        if (player.isSneaking()) {
-            if (!world.isClient()) {
-                boolean hadController = STORED_CONTROLLER.remove(player.getUuid()) != null;
-                boolean hadIntake = STORED_INTAKE.remove(player.getUuid()) != null;
-
-                if (hadController && hadIntake) {
-                    player.sendMessage(Text.literal("§eCleared controller + intake selection").formatted(Formatting.YELLOW), true);
-                } else if (hadController) {
-                    player.sendMessage(Text.literal("§eCleared controller selection").formatted(Formatting.YELLOW), true);
-                } else if (hadIntake) {
-                    player.sendMessage(Text.literal("§eCleared intake selection").formatted(Formatting.YELLOW), true);
-                } else {
-                    player.sendMessage(Text.literal("§7Nothing to clear").formatted(Formatting.GRAY), true);
-                }
-            }
-
-            return net.minecraft.util.TypedActionResult.success(player.getStackInHand(hand), world.isClient());
-        }
-        return net.minecraft.util.TypedActionResult.pass(player.getStackInHand(hand));
-    }
-    *///?}
 
     // ========================================
     // USE ON BLOCK
     // ========================================
 
     @Override
-    public ActionResult useOnBlock(ItemUsageContext context) {
-        World world = context.getWorld();
-        BlockPos pos = context.getBlockPos();
-        PlayerEntity player = context.getPlayer();
+    public InteractionResult useOn(UseOnContext context) {
+        Level world = context.getLevel();
+        BlockPos pos = context.getClickedPos();
+        Player player = context.getPlayer();
 
-        if (player == null) return ActionResult.PASS;
+        if (player == null) return InteractionResult.PASS;
 
         var blockState = world.getBlockState(pos);
 
@@ -109,59 +92,37 @@ public class LinkingToolItem extends Item {
         // SHIFT-CLICK HANDLING
         // ========================================
 
-        if (player.isSneaking()) {
-            // Special case: Cycle mode on Output Probe
-            if (blockState.getBlock() instanceof OutputProbeBlock) {
-                if (!world.isClient()) {
-                    var probeBE = world.getBlockEntity(pos);
-                    if (probeBE instanceof OutputProbeBlockEntity probe) {
-                        probe.cycleMode();
-
-                        String modeName = probe.getModeName();
-                        String modeColor = switch (probe.mode) {
-                            case FILTER -> "§9";
-                            case ACCEPT_ALL -> "§a";
-                            case PRIORITY -> "§6";
-                        };
-
-                        player.sendMessage(Text.literal(modeColor + "Mode: " + modeName), true);
-                    }
-                }
-                return ActionResult.SUCCESS;
-            }
-
-            // Otherwise, clear stored controller
-            if (!world.isClient()) {
-                boolean hadController = STORED_CONTROLLER.remove(player.getUuid()) != null;
-                boolean hadIntake = STORED_INTAKE.remove(player.getUuid()) != null;
+        if (player.isShiftKeyDown()) {
+            // Clear stored controller / intake
+            if (!world.isClientSide()) {
+                boolean hadController = STORED_CONTROLLER.remove(player.getUUID()) != null;
+                boolean hadIntake = STORED_INTAKE.remove(player.getUUID()) != null;
 
                 if (hadController && hadIntake) {
-                    player.sendMessage(Text.literal("§eCleared controller + intake selection").formatted(Formatting.YELLOW), true);
+                    player.sendOverlayMessage(Component.literal("§eCleared controller + intake selection").withStyle(ChatFormatting.YELLOW));
                 } else if (hadController) {
-                    player.sendMessage(Text.literal("§eCleared controller selection").formatted(Formatting.YELLOW), true);
+                    player.sendOverlayMessage(Component.literal("§eCleared controller selection").withStyle(ChatFormatting.YELLOW));
                 } else if (hadIntake) {
-                    player.sendMessage(Text.literal("§eCleared intake selection").formatted(Formatting.YELLOW), true);
+                    player.sendOverlayMessage(Component.literal("§eCleared intake selection").withStyle(ChatFormatting.YELLOW));
                 } else {
-                    player.sendMessage(Text.literal("§7Nothing to clear").formatted(Formatting.GRAY), true);
+                    player.sendOverlayMessage(Component.literal("§7Nothing to clear").withStyle(ChatFormatting.GRAY));
                 }
             }
-            return ActionResult.SUCCESS;
+            return InteractionResult.SUCCESS;
         }
 
-        if (world.isClient()) return ActionResult.SUCCESS;
+        if (world.isClientSide()) return InteractionResult.SUCCESS;
 
         // ========================================
         // STORAGE CONTROLLER LINKING
         // ========================================
 
         if (blockState.getBlock() instanceof StorageControllerBlock) {
-            STORED_CONTROLLER.put(player.getUuid(), pos);
+            STORED_CONTROLLER.put(player.getUUID(), pos);
 
-            player.sendMessage(
-                    Text.literal("§aStorage Controller selected  §7Now right-click probes or intakes to link them"),
-                    true
-            );
-            return ActionResult.SUCCESS;
+            player.sendOverlayMessage(
+                    Component.literal("§aStorage Controller selected  §7Now right-click probes or intakes to link them"));
+            return InteractionResult.SUCCESS;
         }
 
         // ========================================
@@ -169,45 +130,37 @@ public class LinkingToolItem extends Item {
         // ========================================
 
         if (blockState.getBlock() instanceof OutputProbeBlock) {
-            BlockPos controllerPos = STORED_CONTROLLER.get(player.getUuid());
-            BlockPos intakePos = STORED_INTAKE.get(player.getUuid());
+            BlockPos controllerPos = STORED_CONTROLLER.get(player.getUUID());
+            BlockPos intakePos = STORED_INTAKE.get(player.getUUID());
 
             // DIRECT MODE: Link intake directly to probe
             if (intakePos != null && controllerPos == null) {
                 var intakeBE = world.getBlockEntity(intakePos);
                 if (!(intakeBE instanceof IntakeBlockEntity intake)) {
-                    player.sendMessage(Text.literal("§cIntake no longer exists!").formatted(Formatting.RED), true);
-                    STORED_INTAKE.remove(player.getUuid());
-                    return ActionResult.FAIL;
+                    player.sendOverlayMessage(Component.literal("§cIntake no longer exists!").withStyle(ChatFormatting.RED));
+                    STORED_INTAKE.remove(player.getUUID());
+                    return InteractionResult.FAIL;
                 }
 
                 var probeBE = world.getBlockEntity(pos);
                 if (!(probeBE instanceof OutputProbeBlockEntity probe)) {
-                    player.sendMessage(Text.literal("§cProbe not found!").formatted(Formatting.RED), true);
-                    return ActionResult.FAIL;
+                    player.sendOverlayMessage(Component.literal("§cProbe not found!").withStyle(ChatFormatting.RED));
+                    return InteractionResult.FAIL;
                 }
 
                 boolean intakeAdded = intake.addOutput(pos);
                 boolean probeAdded = probe.addLinkedBlock(intakePos);
 
                 if (intakeAdded && probeAdded) {
-                    String modeColor = switch (probe.mode) {
-                        case FILTER -> "§9";
-                        case ACCEPT_ALL -> "§a";
-                        case PRIORITY -> "§6";
-                    };
+                    player.sendOverlayMessage(
+                            Component.literal("§a✓ Direct Mode | §b" + probe.getFilterSummary() + " §7(Click intake again to add more)"));
 
-                    player.sendMessage(
-                            Text.literal("§a✓ Direct Mode | " + modeColor + probe.getModeName() + " §7(Click intake again to add more)"),
-                            true
-                    );
+                    STORED_INTAKE.remove(player.getUUID());
 
-                    STORED_INTAKE.remove(player.getUuid());
-
-                    return ActionResult.SUCCESS;
+                    return InteractionResult.SUCCESS;
                 } else {
-                    player.sendMessage(Text.literal("§eAlready linked!").formatted(Formatting.YELLOW), true);
-                    return ActionResult.FAIL;
+                    player.sendOverlayMessage(Component.literal("§eAlready linked!").withStyle(ChatFormatting.YELLOW));
+                    return InteractionResult.FAIL;
                 }
             }
 
@@ -215,15 +168,15 @@ public class LinkingToolItem extends Item {
             if (controllerPos != null) {
                 var controllerBE = world.getBlockEntity(controllerPos);
                 if (!(controllerBE instanceof StorageControllerBlockEntity controller)) {
-                    player.sendMessage(Text.literal("§cController no longer exists!").formatted(Formatting.RED), true);
-                    STORED_CONTROLLER.remove(player.getUuid());
-                    return ActionResult.FAIL;
+                    player.sendOverlayMessage(Component.literal("§cController no longer exists!").withStyle(ChatFormatting.RED));
+                    STORED_CONTROLLER.remove(player.getUUID());
+                    return InteractionResult.FAIL;
                 }
 
                 var probeBE = world.getBlockEntity(pos);
                 if (!(probeBE instanceof OutputProbeBlockEntity probe)) {
-                    player.sendMessage(Text.literal("§cProbe not found!").formatted(Formatting.RED), true);
-                    return ActionResult.FAIL;
+                    player.sendOverlayMessage(Component.literal("§cProbe not found!").withStyle(ChatFormatting.RED));
+                    return InteractionResult.FAIL;
                 }
 
                 // Check if BOTH sides are already linked (bidirectional check)
@@ -232,8 +185,8 @@ public class LinkingToolItem extends Item {
                                 controller.getLinkedProbes().contains(pos);
 
                 if (isBidirectionallyLinked) {
-                    player.sendMessage(Text.literal("§eAlready linked to this controller!").formatted(Formatting.YELLOW), true);
-                    return ActionResult.FAIL;
+                    player.sendOverlayMessage(Component.literal("§eAlready linked to this controller!").withStyle(ChatFormatting.YELLOW));
+                    return InteractionResult.FAIL;
                 }
 
                 // Try to add the links (Fix 2 will clean up stale links here)
@@ -242,26 +195,17 @@ public class LinkingToolItem extends Item {
 
                 if (controllerAdded || probeAdded) {
                     // At least one side was added (success or repair)
-                    String modeColor = switch (probe.mode) {
-                        case FILTER -> "§9";
-                        case ACCEPT_ALL -> "§a";
-                        case PRIORITY -> "§6";
-                    };
-                    String modeName = probe.getModeName();
-
-                    player.sendMessage(
-                            Text.literal("§a✓ Output Probe linked | " + modeColor + modeName),
-                            true
-                    );
-                    return ActionResult.SUCCESS;
+                    player.sendOverlayMessage(
+                            Component.literal("§a✓ Output Probe linked | §b" + probe.getFilterSummary()));
+                    return InteractionResult.SUCCESS;
                 } else {
-                    player.sendMessage(Text.literal("§eAlready linked!").formatted(Formatting.YELLOW), true);
-                    return ActionResult.FAIL;
+                    player.sendOverlayMessage(Component.literal("§eAlready linked!").withStyle(ChatFormatting.YELLOW));
+                    return InteractionResult.FAIL;
                 }
             }
             // Nothing stored
-            player.sendMessage(Text.literal("§eSelect a Storage Controller or Intake first!").formatted(Formatting.RED), true);
-            return ActionResult.FAIL;
+            player.sendOverlayMessage(Component.literal("§eSelect a Storage Controller or Intake first!").withStyle(ChatFormatting.RED));
+            return InteractionResult.FAIL;
         }
 
         // ========================================
@@ -269,37 +213,35 @@ public class LinkingToolItem extends Item {
         // ========================================
 
         if (blockState.getBlock() instanceof ProcessProbeBlock) {
-            BlockPos controllerPos = STORED_CONTROLLER.get(player.getUuid());
+            BlockPos controllerPos = STORED_CONTROLLER.get(player.getUUID());
 
             if (controllerPos == null) {
-                player.sendMessage(Text.literal("§eSelect a Storage Controller first!").formatted(Formatting.RED), true);
-                return ActionResult.FAIL;
+                player.sendOverlayMessage(Component.literal("§eSelect a Storage Controller first!").withStyle(ChatFormatting.RED));
+                return InteractionResult.FAIL;
             }
 
             var controllerBE = world.getBlockEntity(controllerPos);
             if (!(controllerBE instanceof StorageControllerBlockEntity controller)) {
-                player.sendMessage(Text.literal("§cController no longer exists!").formatted(Formatting.RED), true);
-                STORED_CONTROLLER.remove(player.getUuid());
-                return ActionResult.FAIL;
+                player.sendOverlayMessage(Component.literal("§cController no longer exists!").withStyle(ChatFormatting.RED));
+                STORED_CONTROLLER.remove(player.getUUID());
+                return InteractionResult.FAIL;
             }
 
             var probeBE = world.getBlockEntity(pos);
             if (!(probeBE instanceof ProcessProbeBlockEntity probe)) {
-                player.sendMessage(Text.literal("§cProcess Probe not found!").formatted(Formatting.RED), true);
-                return ActionResult.FAIL;
+                player.sendOverlayMessage(Component.literal("§cProcess Probe not found!").withStyle(ChatFormatting.RED));
+                return InteractionResult.FAIL;
             }
 
             boolean probeAdded = probe.addLinkedBlock(controllerPos);
 
             if (probeAdded) {
-                player.sendMessage(
-                        Text.literal("§a✓ Process Probe linked"),
-                        true
-                );
-                return ActionResult.SUCCESS;
+                player.sendOverlayMessage(
+                        Component.literal("§a✓ Process Probe linked"));
+                return InteractionResult.SUCCESS;
             } else {
-                player.sendMessage(Text.literal("§eAlready linked!").formatted(Formatting.YELLOW), true);
-                return ActionResult.FAIL;
+                player.sendOverlayMessage(Component.literal("§eAlready linked!").withStyle(ChatFormatting.YELLOW));
+                return InteractionResult.FAIL;
             }
         }
 
@@ -308,30 +250,28 @@ public class LinkingToolItem extends Item {
         // ========================================
 
         if (blockState.getBlock() instanceof IntakeBlock) {
-            BlockPos controllerPos = STORED_CONTROLLER.get(player.getUuid());
+            BlockPos controllerPos = STORED_CONTROLLER.get(player.getUUID());
 
             // If no controller selected, store this intake for direct linking
             if (controllerPos == null) {
-                STORED_INTAKE.put(player.getUuid(), pos);
-                player.sendMessage(
-                        Text.literal("§bIntake selected  §7Right-click Output Probes for Direct Mode or select Storage Controller for Managed Mode"),
-                        true
-                );
-                return ActionResult.SUCCESS;
+                STORED_INTAKE.put(player.getUUID(), pos);
+                player.sendOverlayMessage(
+                        Component.literal("§bIntake selected  §7Right-click Output Probes for Direct Mode or select Storage Controller for Managed Mode"));
+                return InteractionResult.SUCCESS;
             }
 
             // MANAGED MODE: Controller is selected
             var controllerBE = world.getBlockEntity(controllerPos);
             if (!(controllerBE instanceof StorageControllerBlockEntity controller)) {
-                player.sendMessage(Text.literal("§cController no longer exists!").formatted(Formatting.RED), true);
-                STORED_CONTROLLER.remove(player.getUuid());
-                return ActionResult.FAIL;
+                player.sendOverlayMessage(Component.literal("§cController no longer exists!").withStyle(ChatFormatting.RED));
+                STORED_CONTROLLER.remove(player.getUUID());
+                return InteractionResult.FAIL;
             }
 
             var intakeBE = world.getBlockEntity(pos);
             if (!(intakeBE instanceof IntakeBlockEntity intake)) {
-                player.sendMessage(Text.literal("§cIntake not found!").formatted(Formatting.RED), true);
-                return ActionResult.FAIL;
+                player.sendOverlayMessage(Component.literal("§cIntake not found!").withStyle(ChatFormatting.RED));
+                return InteractionResult.FAIL;
             }
 
             boolean intakeLinked = intake.setController(controllerPos);
@@ -343,14 +283,12 @@ public class LinkingToolItem extends Item {
                         ? "§e(No output probes yet)"
                         : "§a(" + probeCount + " probes)";
 
-                player.sendMessage(
-                        Text.literal("§a✓ Intake → Managed Mode " + probeStatus),
-                        true
-                );
-                return ActionResult.SUCCESS;
+                player.sendOverlayMessage(
+                        Component.literal("§a✓ Intake → Managed Mode " + probeStatus));
+                return InteractionResult.SUCCESS;
             } else {
-                player.sendMessage(Text.literal("§eAlready linked!").formatted(Formatting.YELLOW), true);
-                return ActionResult.FAIL;
+                player.sendOverlayMessage(Component.literal("§eAlready linked!").withStyle(ChatFormatting.YELLOW));
+                return InteractionResult.FAIL;
             }
         }
 
@@ -358,8 +296,8 @@ public class LinkingToolItem extends Item {
         // FALLBACK
         // ========================================
 
-        player.sendMessage(Text.literal("§7Click Storage Controller first, then click probes/intakes to link").formatted(Formatting.GRAY), true);
-        return ActionResult.PASS;
+        player.sendOverlayMessage(Component.literal("§7Click Storage Controller first, then click probes/intakes to link").withStyle(ChatFormatting.GRAY));
+        return InteractionResult.PASS;
     }
 
         // ========================================

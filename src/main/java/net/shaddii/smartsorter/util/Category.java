@@ -1,17 +1,15 @@
 package net.shaddii.smartsorter.util;
 
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.RegistryKeys;
-import net.minecraft.registry.tag.TagKey;
-import net.minecraft.util.Identifier;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.item.Item;
 
 public class Category implements Comparable<Category> {
     private final Identifier id;
@@ -26,14 +24,14 @@ public class Category implements Comparable<Category> {
 
     // Special categories (always exist)
     public static final Category ALL = new Category(
-            Identifier.of("smartsorter", "all"),
+            Identifier.fromNamespaceAndPath("smartsorter", "all"),
             "All Items",
             "All",
             -1
     );
 
     public static final Category MISC = new Category(
-            Identifier.of("smartsorter", "misc"),
+            Identifier.fromNamespaceAndPath("smartsorter", "misc"),
             "Misc / Rare",
             "Misc",
             9999
@@ -56,7 +54,7 @@ public class Category implements Comparable<Category> {
             String tagId = entry.substring(1);
             Identifier tagIdentifier = Identifier.tryParse(tagId);
             if (tagIdentifier != null) {
-                this.tags.add(TagKey.of(RegistryKeys.ITEM, tagIdentifier));
+                this.tags.add(TagKey.create(Registries.ITEM, tagIdentifier));
             }
         } else {
             // It's an item ID
@@ -74,7 +72,7 @@ public class Category implements Comparable<Category> {
 
         // Add direct items
         for (Identifier itemId : items) {
-            Item item = Registries.ITEM.get(itemId);
+            Item item = BuiltInRegistries.ITEM.getValue(itemId);
             if (item != null) {
                 matchingItemsCache.add(item);
             }
@@ -82,7 +80,7 @@ public class Category implements Comparable<Category> {
 
         // Add items from tags
         for (TagKey<Item> tag : tags) {
-            Registries.ITEM.iterateEntries(tag).forEach(entry -> {
+            BuiltInRegistries.ITEM.getTagOrEmpty(tag).forEach(entry -> {
                 matchingItemsCache.add(entry.value());
             });
         }
@@ -118,7 +116,7 @@ public class Category implements Comparable<Category> {
 
         // Add tags with # prefix
         for (TagKey<Item> tag : tags) {
-            entries.add("#" + tag.id().toString());
+            entries.add("#" + tag.location().toString());
         }
 
         // Add items without prefix

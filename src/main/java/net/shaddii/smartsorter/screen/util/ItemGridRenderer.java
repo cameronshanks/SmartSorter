@@ -1,10 +1,9 @@
 package net.shaddii.smartsorter.screen.util;
 
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.item.ItemStack;
-
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.world.item.ItemStack;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,17 +17,17 @@ public class ItemGridRenderer {
         }
     }
 
-    private final TextRenderer textRenderer;
+    private final Font textRenderer;
 
     // Cache formatted amounts to avoid string operations every frame
     private final Map<Long, String> formattedAmountCache = new HashMap<>();
     private int framesSinceLastCacheClear = 0;
 
-    public ItemGridRenderer(TextRenderer textRenderer) {
+    public ItemGridRenderer(Font textRenderer) {
         this.textRenderer = textRenderer;
     }
 
-    public void renderItems(DrawContext context,
+    public void renderItems(GuiGraphicsExtractor context,
                             List<Map.Entry<ItemVariant, Long>> items,
                             int startIndex, int endIndex,
                             int gridX, int gridY,
@@ -52,14 +51,14 @@ public class ItemGridRenderer {
 
             // Draw item with enchantment glow
             ItemStack stack = variant.toStack();
-            context.drawItem(stack, slotX, slotY);
+            context.item(stack, slotX, slotY);
 
             // Draw amount with cached formatting
             if (amount > 1) {
                 String amountText = formattedAmountCache.computeIfAbsent(amount, this::formatAmount);
                 float scale = 0.75f;
 
-                int rawWidth = textRenderer.getWidth(amountText);
+                int rawWidth = textRenderer.width(amountText);
                 float scaledWidth = rawWidth * scale;
 
                 float textX = slotX + 16 - scaledWidth;
@@ -82,7 +81,7 @@ public class ItemGridRenderer {
         }
     }
 
-    public void renderScrollbar(DrawContext context,
+    public void renderScrollbar(GuiGraphicsExtractor context,
                                 int x, int y,
                                 int width, int height,
                                 float scrollProgress,
@@ -103,20 +102,12 @@ public class ItemGridRenderer {
         }
     }
 
-    private void renderScaledText(DrawContext context, String text, float x, float y, float scale, int color) {
-        //? if >=1.21.8 {
-        context.getMatrices().pushMatrix();
-        context.getMatrices().translate(x, y);
-        context.getMatrices().scale(scale, scale);
-        context.drawText(textRenderer, text, 0, 0, color, true);
-        context.getMatrices().popMatrix();
-        //?} else {
-        /*context.getMatrices().push();
-        context.getMatrices().translate(x, y, 200);
-        context.getMatrices().scale(scale, scale, scale);
-        context.drawText(textRenderer, text, 0, 0, color, true);
-        context.getMatrices().pop();
-        *///?}
+    private void renderScaledText(GuiGraphicsExtractor context, String text, float x, float y, float scale, int color) {
+        context.pose().pushMatrix();
+        context.pose().translate(x, y);
+        context.pose().scale(scale, scale);
+        context.text(textRenderer, text, 0, 0, color, true);
+        context.pose().popMatrix();
     }
 
     private String formatAmount(long amount) {

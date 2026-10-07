@@ -1,10 +1,10 @@
 package net.shaddii.smartsorter.network;
 
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.util.ChestConfig;
 
@@ -15,20 +15,20 @@ import java.util.Map;
  * Lightweight payload for bulk priority updates
  * Only sends position + priority + SimplePriority (not full config)
  */
-public record ChestPriorityBatchPayload(Map<BlockPos, PriorityUpdate> updates) implements CustomPayload {
+public record ChestPriorityBatchPayload(Map<BlockPos, PriorityUpdate> updates) implements CustomPacketPayload {
 
-    public static final Id<ChestPriorityBatchPayload> ID =
-            new Id<>(Identifier.of(SmartSorter.MOD_ID, "chest_priority_batch"));
+    public static final Type<ChestPriorityBatchPayload> ID =
+            new Type<>(Identifier.fromNamespaceAndPath(SmartSorter.MOD_ID, "chest_priority_batch"));
 
-    public static final PacketCodec<RegistryByteBuf, ChestPriorityBatchPayload> CODEC =
-            new PacketCodec<>() {
+    public static final StreamCodec<RegistryFriendlyByteBuf, ChestPriorityBatchPayload> CODEC =
+            new StreamCodec<>() {
                 @Override
-                public ChestPriorityBatchPayload decode(RegistryByteBuf buf) {
+                public ChestPriorityBatchPayload decode(RegistryFriendlyByteBuf buf) {
                     return ChestPriorityBatchPayload.read(buf);
                 }
 
                 @Override
-                public void encode(RegistryByteBuf buf, ChestPriorityBatchPayload payload) {
+                public void encode(RegistryFriendlyByteBuf buf, ChestPriorityBatchPayload payload) {
                     ChestPriorityBatchPayload.write(buf, payload);
                 }
             };
@@ -41,11 +41,11 @@ public record ChestPriorityBatchPayload(Map<BlockPos, PriorityUpdate> updates) i
     ) {}
 
     @Override
-    public Id<? extends CustomPayload> getId() {
+    public Type<? extends CustomPacketPayload> type() {
         return ID;
     }
 
-    public static void write(RegistryByteBuf buf, ChestPriorityBatchPayload payload) {
+    public static void write(RegistryFriendlyByteBuf buf, ChestPriorityBatchPayload payload) {
         buf.writeVarInt(payload.updates.size());
 
         for (Map.Entry<BlockPos, PriorityUpdate> entry : payload.updates.entrySet()) {
@@ -55,7 +55,7 @@ public record ChestPriorityBatchPayload(Map<BlockPos, PriorityUpdate> updates) i
             // Handle null SimplePriority
             if (entry.getValue().simplePriority != null) {
                 buf.writeBoolean(true);
-                buf.writeEnumConstant(entry.getValue().simplePriority);
+                buf.writeEnum(entry.getValue().simplePriority);
             } else {
                 buf.writeBoolean(false);
             }
@@ -65,7 +65,7 @@ public record ChestPriorityBatchPayload(Map<BlockPos, PriorityUpdate> updates) i
         }
     }
 
-    public static ChestPriorityBatchPayload read(RegistryByteBuf buf) {
+    public static ChestPriorityBatchPayload read(RegistryFriendlyByteBuf buf) {
         int size = buf.readVarInt();
         Map<BlockPos, PriorityUpdate> updates = new HashMap<>();
 
@@ -76,7 +76,7 @@ public record ChestPriorityBatchPayload(Map<BlockPos, PriorityUpdate> updates) i
             // Handle null SimplePriority
             ChestConfig.SimplePriority simplePriority = null;
             if (buf.readBoolean()) {
-                simplePriority = buf.readEnumConstant(ChestConfig.SimplePriority.class);
+                simplePriority = buf.readEnum(ChestConfig.SimplePriority.class);
             }
 
             int hiddenPriority = buf.readVarInt();

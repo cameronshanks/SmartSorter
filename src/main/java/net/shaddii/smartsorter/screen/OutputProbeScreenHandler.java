@@ -1,12 +1,11 @@
 package net.shaddii.smartsorter.screen;
 
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.util.math.BlockPos;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.item.ItemStack;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
@@ -15,7 +14,7 @@ import net.shaddii.smartsorter.util.ChestConfig;
 
 import org.jetbrains.annotations.Nullable;
 
-public class OutputProbeScreenHandler extends ScreenHandler {
+public class OutputProbeScreenHandler extends AbstractContainerMenu {
 
     public BlockPos chestPos;
     private ChestConfig chestConfig;
@@ -31,7 +30,7 @@ public class OutputProbeScreenHandler extends ScreenHandler {
     public final OutputProbeBlockEntity probe;
 
     // Constructor for client-side
-    public OutputProbeScreenHandler(int syncId, PlayerInventory playerInventory, OutputProbeBlockEntity.ProbeData data) {
+    public OutputProbeScreenHandler(int syncId, Inventory playerInventory, OutputProbeBlockEntity.ProbeData data) {
         this(syncId, playerInventory, (OutputProbeBlockEntity) null);
 
         // Read data from server
@@ -40,7 +39,7 @@ public class OutputProbeScreenHandler extends ScreenHandler {
     }
 
     // Constructor for server-side (from block entity)
-    public OutputProbeScreenHandler(int syncId, PlayerInventory playerInventory, @Nullable OutputProbeBlockEntity probe) {
+    public OutputProbeScreenHandler(int syncId, Inventory playerInventory, @Nullable OutputProbeBlockEntity probe) {
         super(SmartSorter.OUTPUT_PROBE_SCREEN_HANDLER, syncId);
         this.probe = probe;
 
@@ -51,8 +50,8 @@ public class OutputProbeScreenHandler extends ScreenHandler {
 
             // Try to find linked controller
             BlockPos controllerPos = probe.getLinkedController();
-            if (controllerPos != null && probe.getWorld() != null) {
-                var be = probe.getWorld().getBlockEntity(controllerPos);
+            if (controllerPos != null && probe.getLevel() != null) {
+                var be = probe.getLevel().getBlockEntity(controllerPos);
                 if (be instanceof StorageControllerBlockEntity controllerBE) {
                     this.controller = controllerBE;
                 }
@@ -109,20 +108,20 @@ public class OutputProbeScreenHandler extends ScreenHandler {
     }
 
     @Override
-    public ItemStack quickMove(PlayerEntity player, int slot) {
+    public ItemStack quickMoveStack(Player player, int slot) {
         return ItemStack.EMPTY;
     }
 
     @Override
-    public boolean canUse(PlayerEntity player) {
+    public boolean stillValid(Player player) {
         if (probe != null) {
-            return player.squaredDistanceTo(
-                    probe.getPos().getX() + 0.5,
-                    probe.getPos().getY() + 0.5,
-                    probe.getPos().getZ() + 0.5
+            return player.distanceToSqr(
+                    probe.getBlockPos().getX() + 0.5,
+                    probe.getBlockPos().getY() + 0.5,
+                    probe.getBlockPos().getZ() + 0.5
             ) <= 64.0;
         }
-        return chestPos == null || player.squaredDistanceTo(
+        return chestPos == null || player.distanceToSqr(
                 chestPos.getX() + 0.5,
                 chestPos.getY() + 0.5,
                 chestPos.getZ() + 0.5

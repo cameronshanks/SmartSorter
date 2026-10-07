@@ -4,9 +4,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
-import net.minecraft.item.Item;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.Item;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 import net.shaddii.smartsorter.screen.OutputProbeScreenHandler;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
@@ -31,7 +31,7 @@ public final class WhitelistNetworking {
 
         // The Output Probe screen asking for the current state.
         ServerPlayNetworking.registerGlobalReceiver(WhitelistRequestPayload.ID, (payload, context) -> context.server().execute(() -> {
-            ServerPlayerEntity player = context.player();
+            ServerPlayer player = context.player();
             ChestConfig config = configFor(player, payload.position());
             if (config != null) {
                 ServerPlayNetworking.send(player, snapshotOf(payload.position(), config));
@@ -46,7 +46,7 @@ public final class WhitelistNetworking {
                 return;
             }
             config.whitelistEnabled = !config.whitelistEnabled;
-            controller.markDirty();
+            controller.setChanged();
             RoutingIndexEpoch.bump(); // filter edit
             WhitelistBroadcast.toViewers(context.server(), controller, snapshotOf(payload.position(), config));
         }));
@@ -59,7 +59,7 @@ public final class WhitelistNetworking {
                 return;
             }
             config.whitelistEditMode = !config.whitelistEditMode;
-            controller.markDirty();
+            controller.setChanged();
             WhitelistBroadcast.toViewers(context.server(), controller, snapshotOf(payload.position(), config));
         }));
     }
@@ -70,17 +70,17 @@ public final class WhitelistNetworking {
     }
 
     /** The controller behind the player's open screen - same lookup as ChestConfigUpdatePayload's handler. */
-    private static StorageControllerBlockEntity controllerOf(ServerPlayerEntity player) {
-        if (player.currentScreenHandler instanceof StorageControllerScreenHandler mainHandler) {
+    private static StorageControllerBlockEntity controllerOf(ServerPlayer player) {
+        if (player.containerMenu instanceof StorageControllerScreenHandler mainHandler) {
             return mainHandler.controller;
         }
-        if (player.currentScreenHandler instanceof OutputProbeScreenHandler probeHandler) {
+        if (player.containerMenu instanceof OutputProbeScreenHandler probeHandler) {
             return probeHandler.controller;
         }
         return null;
     }
 
-    private static ChestConfig configFor(ServerPlayerEntity player, BlockPos chestPos) {
+    private static ChestConfig configFor(ServerPlayer player, BlockPos chestPos) {
         StorageControllerBlockEntity controller = controllerOf(player);
         return controller == null ? null : controller.getChestConfig(chestPos);
     }

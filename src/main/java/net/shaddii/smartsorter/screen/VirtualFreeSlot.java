@@ -1,8 +1,8 @@
 package net.shaddii.smartsorter.screen;
 
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.screen.slot.Slot;
+import net.minecraft.world.Container;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.ItemStack;
 
 /**
  * A lightweight, interactive placeholder slot representing a free slot
@@ -18,34 +18,34 @@ public class VirtualFreeSlot extends Slot {
     }
 
     @Override
-    public boolean hasStack() {
+    public boolean hasItem() {
         return !displayStack.isEmpty();
     }
 
     @Override
-    public ItemStack getStack() {
+    public ItemStack getItem() {
         return displayStack;
     }
 
     @Override
-    public void setStack(ItemStack stack) {
+    public void setByPlayer(ItemStack stack) {
         this.displayStack = stack;
-        this.markDirty();
+        this.setChanged();
     }
 
     @Override
-    public void markDirty() {
+    public void setChanged() {
         // optional hook for UI refresh
     }
 
     @Override
-    public boolean canInsert(ItemStack stack) {
+    public boolean mayPlace(ItemStack stack) {
         // allow deposit interaction from player
         return true;
     }
 
     @Override
-    public ItemStack takeStack(int amount) {
+    public ItemStack remove(int amount) {
         if (displayStack.isEmpty()) return ItemStack.EMPTY;
 
         ItemStack taken = displayStack.split(amount);
@@ -54,15 +54,15 @@ public class VirtualFreeSlot extends Slot {
     }
 
     // simple static dummy inventory backing these free slots
-    private static class DummyInventory implements Inventory {
-        @Override public int size() { return 0; }
+    private static class DummyInventory implements Container {
+        @Override public int getContainerSize() { return 0; }
         @Override public boolean isEmpty() { return true; }
-        @Override public ItemStack getStack(int slot) { return ItemStack.EMPTY; }
-        @Override public ItemStack removeStack(int slot, int amount) { return ItemStack.EMPTY; }
-        @Override public ItemStack removeStack(int slot) { return ItemStack.EMPTY; }
-        @Override public void setStack(int slot, ItemStack stack) {}
-        @Override public void markDirty() {}
-        @Override public boolean canPlayerUse(net.minecraft.entity.player.PlayerEntity player) { return true; }
-        @Override public void clear() {}
+        @Override public ItemStack getItem(int slot) { return ItemStack.EMPTY; }
+        @Override public ItemStack removeItem(int slot, int amount) { return ItemStack.EMPTY; }
+        @Override public ItemStack removeItemNoUpdate(int slot) { return ItemStack.EMPTY; }
+        @Override public void setItem(int slot, ItemStack stack) {}
+        @Override public void setChanged() {}
+        @Override public boolean stillValid(net.minecraft.world.entity.player.Player player) { return true; }
+        @Override public void clearContent() {}
     }
 }

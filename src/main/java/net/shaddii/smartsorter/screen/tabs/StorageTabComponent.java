@@ -2,12 +2,12 @@ package net.shaddii.smartsorter.screen.tabs;
 
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.item.ItemStack;
-import net.minecraft.text.Text;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
 import net.shaddii.smartsorter.network.*;
 import net.shaddii.smartsorter.screen.StorageControllerScreen;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
@@ -35,8 +35,8 @@ public class StorageTabComponent extends TabComponent {
     private static final long CAPACITY_UPDATE_INTERVAL = 1000; // Update every 1 second
 
     // Widgets
-    private TextFieldWidget searchBox;
-    private ButtonWidget sortButton;
+    private EditBox searchBox;
+    private Button sortButton;
     private DropdownWidget filterDropdown;
 
     // State
@@ -61,27 +61,27 @@ public class StorageTabComponent extends TabComponent {
     public StorageTabComponent(StorageControllerScreen parent, StorageControllerScreenHandler handler) {
         super(parent, handler);
         this.cacheManager = new ItemCacheManager();
-        this.gridRenderer = new ItemGridRenderer(parent.getTextRenderer());
-        this.tooltipRenderer = new TooltipRenderer(parent.getTextRenderer());
+        this.gridRenderer = new ItemGridRenderer(parent.getFont());
+        this.tooltipRenderer = new TooltipRenderer(parent.getFont());
     }
 
     @Override
     protected void initWidgets() {
         // Search box
-        searchBox = new TextFieldWidget(parent.getTextRenderer(), guiX + 82, guiY + 6, 90, 13, Text.literal(""));
-        searchBox.setDrawsBackground(false);
-        searchBox.setChangedListener(this::onSearchChanged);
+        searchBox = new EditBox(parent.getFont(), guiX + 82, guiY + 6, 90, 13, Component.literal(""));
+        searchBox.setBordered(false);
+        searchBox.setResponder(this::onSearchChanged);
         parent.addWidget(searchBox);
 
         // Sort button
-        sortButton = ButtonWidget.builder(
-                Text.literal(handler.getSortMode().getDisplayName()),
+        sortButton = Button.builder(
+                Component.literal(handler.getSortMode().getDisplayName()),
                 btn -> cycleSortMode()
-        ).dimensions(guiX + 82, guiY + 6 + 13 - 34, 30, 12).build();
+        ).bounds(guiX + 82, guiY + 6 + 13 - 34, 30, 12).build();
         parent.addWidget(sortButton);
 
         // Filter dropdown
-        filterDropdown = new DropdownWidget(guiX + 82 + 30 + 2, guiY + 6 + 13 - 34, 60, 12, Text.literal(""));
+        filterDropdown = new DropdownWidget(guiX + 82 + 30 + 2, guiY + 6 + 13 - 34, 60, 12, Component.literal(""));
         initFilterDropdown();
         parent.addWidget(filterDropdown);
 
@@ -89,30 +89,23 @@ public class StorageTabComponent extends TabComponent {
     }
 
     @Override
-    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
         renderTitle(context);
         renderCapacity(context);
         renderNetworkItems(context, mouseX, mouseY);
         drawScrollbar(context);
 
         if (filterDropdown != null && filterDropdown.isOpen()) {
-            //? if >=1.21.8 {
             filterDropdown.renderDropdown(context, mouseX, mouseY);
-            //?} else {
-            /*context.getMatrices().push();
-            context.getMatrices().translate(0, 0, 300);
-            filterDropdown.renderDropdown(context, mouseX, mouseY);
-            context.getMatrices().pop();
-            *///?}
         }
     }
 
-    private void renderTitle(DrawContext context) {
-        context.drawText(parent.getTextRenderer(), Text.literal("Controller"), guiX + 7, guiY + 6, 0xFF404040, false);
-        context.drawText(parent.getTextRenderer(), Text.literal("Inventory"), guiX + 8, guiY + 109, 0xFF404040, false);
+    private void renderTitle(GuiGraphicsExtractor context) {
+        context.text(parent.getFont(), Component.literal("Controller"), guiX + 7, guiY + 6, 0xFF404040, false);
+        context.text(parent.getFont(), Component.literal("Inventory"), guiX + 8, guiY + 109, 0xFF404040, false);
     }
 
-    private void renderCapacity(DrawContext context) {
+    private void renderCapacity(GuiGraphicsExtractor context) {
         if (handler.controller == null) return;
 
         // Only recalculate capacity periodically
@@ -124,11 +117,11 @@ public class StorageTabComponent extends TabComponent {
 
         // Render cached values
         if (!cachedCapacityText.isEmpty()) {
-            int textWidth = parent.getTextRenderer().getWidth(cachedCapacityText);
+            int textWidth = parent.getFont().width(cachedCapacityText);
             int textX = guiX + backgroundWidth - textWidth - 26;
             int textY = guiY + 6;
 
-            context.drawText(parent.getTextRenderer(), Text.literal(cachedCapacityText),
+            context.text(parent.getFont(), Component.literal(cachedCapacityText),
                     textX, textY, 0xFF000000 | cachedCapacityColor, false);
         }
     }
@@ -149,7 +142,7 @@ public class StorageTabComponent extends TabComponent {
         }
     }
 
-    private void renderNetworkItems(DrawContext context, int mouseX, int mouseY) {
+    private void renderNetworkItems(GuiGraphicsExtractor context, int mouseX, int mouseY) {
         int scrollOffset = (int) (scrollProgress * maxScrollRows);
         int startIndex = scrollOffset * ITEMS_PER_ROW;
         int endIndex = Math.min(startIndex + ITEMS_PER_PAGE, networkItemsList.size());
@@ -163,7 +156,7 @@ public class StorageTabComponent extends TabComponent {
         return searchBox != null && searchBox.isFocused();
     }
 
-    private void drawScrollbar(DrawContext context) {
+    private void drawScrollbar(GuiGraphicsExtractor context) {
         int scrollbarX = guiX + SCROLLBAR_X;
         int scrollbarY = guiY + SCROLLBAR_Y;
 
@@ -172,7 +165,7 @@ public class StorageTabComponent extends TabComponent {
                 scrollProgress, maxScrollRows > 0);
     }
 
-    public void renderTooltip(DrawContext context, int mouseX, int mouseY) {
+    public void renderTooltip(GuiGraphicsExtractor context, int mouseX, int mouseY) {
         if (filterDropdown != null && filterDropdown.isOpen() && filterDropdown.isMouseOver(mouseX, mouseY)) {
             return;
         }
@@ -191,8 +184,8 @@ public class StorageTabComponent extends TabComponent {
 
             if (isMouseOverSlot(slotX, slotY, mouseX, mouseY)) {
                 var entry = networkItemsList.get(i);
-                List<Text> tooltip = tooltipRenderer.createItemTooltip(entry.getKey(), entry.getValue());
-                context.drawTooltip(parent.getTextRenderer(), tooltip, mouseX, mouseY);
+                List<Component> tooltip = tooltipRenderer.createItemTooltip(entry.getKey(), entry.getValue());
+                context.setComponentTooltipForNextFrame(parent.getFont(), tooltip, mouseX, mouseY);
                 break;
             }
         }
@@ -259,7 +252,7 @@ public class StorageTabComponent extends TabComponent {
                 }
             }
 
-            if (!handler.getCursorStack().isEmpty()) {
+            if (!handler.getCarried().isEmpty()) {
                 handleEmptyAreaClick(button);
                 return true;
             }
@@ -273,7 +266,7 @@ public class StorageTabComponent extends TabComponent {
         ItemVariant variant = entry.getKey();
         long itemCount = entry.getValue();
 
-        ItemStack cursorStack = handler.getCursorStack();
+        ItemStack cursorStack = handler.getCarried();
 
         if (!cursorStack.isEmpty()) {
             ItemVariant cursorVariant = ItemVariant.of(cursorStack);
@@ -281,15 +274,15 @@ public class StorageTabComponent extends TabComponent {
             if (cursorVariant.equals(variant)) {
                 if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
                     handler.requestDeposit(cursorStack, cursorStack.getCount());
-                    handler.setCursorStack(ItemStack.EMPTY);
+                    handler.setCarried(ItemStack.EMPTY);
                 } else if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
                     handler.requestDeposit(cursorStack, 1);
-                    cursorStack.decrement(1);
-                    handler.setCursorStack(cursorStack.isEmpty() ? ItemStack.EMPTY : cursorStack);
+                    cursorStack.shrink(1);
+                    handler.setCarried(cursorStack.isEmpty() ? ItemStack.EMPTY : cursorStack);
                 }
             } else {
                 handler.requestDeposit(cursorStack, cursorStack.getCount());
-                handler.setCursorStack(ItemStack.EMPTY);
+                handler.setCarried(ItemStack.EMPTY);
             }
             return;
         }
@@ -305,29 +298,29 @@ public class StorageTabComponent extends TabComponent {
             } else if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
                 amount = (int) Math.min(32, Math.max(1, itemCount / 2));
             } else {
-                amount = (int) Math.min(variant.getItem().getMaxCount(), itemCount);
+                amount = (int) Math.min(variant.getItem().getDefaultMaxStackSize(), itemCount);
             }
         }
 
         if (!isShift) {
             ItemStack extracted = variant.toStack(amount);
-            handler.setCursorStack(extracted);
+            handler.setCarried(extracted);
         }
 
         handler.requestExtraction(variant, amount, isShift);
     }
 
     private void handleEmptyAreaClick(int button) {
-        ItemStack cursorStack = handler.getCursorStack();
+        ItemStack cursorStack = handler.getCarried();
         if (cursorStack.isEmpty()) return;
 
         if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             handler.requestDeposit(cursorStack, cursorStack.getCount());
-            handler.setCursorStack(ItemStack.EMPTY);
+            handler.setCarried(ItemStack.EMPTY);
         } else if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
             handler.requestDeposit(cursorStack, 1);
-            cursorStack.decrement(1);
-            handler.setCursorStack(cursorStack.isEmpty() ? ItemStack.EMPTY : cursorStack);
+            cursorStack.shrink(1);
+            handler.setCarried(cursorStack.isEmpty() ? ItemStack.EMPTY : cursorStack);
         }
     }
 
@@ -433,12 +426,12 @@ public class StorageTabComponent extends TabComponent {
         SortMode currentMode = handler.getSortMode();
         SortMode newMode = currentMode.next();
 
-        sortButton.setMessage(Text.literal(newMode.getDisplayName()));
+        sortButton.setMessage(Component.literal(newMode.getDisplayName()));
         handler.setSortMode(newMode);
 
         markDirty();
 
-        ClientPlayNetworking.send(new SortModeChangePayload(newMode.asString()));
+        ClientPlayNetworking.send(new SortModeChangePayload(newMode.getSerializedName()));
     }
 
     private void initFilterDropdown() {
@@ -502,13 +495,13 @@ public class StorageTabComponent extends TabComponent {
     }
 
     private boolean isControlDown() {
-        long handle = MinecraftClient.getInstance().getWindow().getHandle();
+        long handle = Minecraft.getInstance().getWindow().handle();
         return GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS ||
                 GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS;
     }
 
     private boolean isShiftDown() {
-        long handle = MinecraftClient.getInstance().getWindow().getHandle();
+        long handle = Minecraft.getInstance().getWindow().handle();
         return GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_SHIFT) == GLFW.GLFW_PRESS ||
                 GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS;
     }

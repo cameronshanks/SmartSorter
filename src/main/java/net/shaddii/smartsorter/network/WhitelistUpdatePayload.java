@@ -4,13 +4,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
-import net.minecraft.item.Item;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.Item;
 
 /**
  * Server -> client only: reports a chest's whitelist state - whether sorting
@@ -29,43 +29,43 @@ import net.minecraft.util.math.BlockPos;
  * broadcast the result - nothing needs to send a client-built item list
  * anymore.
  */
-public record WhitelistUpdatePayload(BlockPos position, boolean enabled, boolean editMode, List<Item> items) implements CustomPayload {
+public record WhitelistUpdatePayload(BlockPos position, boolean enabled, boolean editMode, List<Item> items) implements CustomPacketPayload {
 
     // A hard ceiling on the wire so a malformed/hostile packet can't make
     // either side allocate an unbounded list.
     public static final int MAX_ITEMS = 64;
 
-    public static final CustomPayload.Id<WhitelistUpdatePayload> ID =
-            new CustomPayload.Id<>(Identifier.of("smartsorter", "whitelist_update"));
+    public static final CustomPacketPayload.Type<WhitelistUpdatePayload> ID =
+            new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath("smartsorter", "whitelist_update"));
 
-    public static final PacketCodec<RegistryByteBuf, WhitelistUpdatePayload> CODEC = new PacketCodec<>() {
+    public static final StreamCodec<RegistryFriendlyByteBuf, WhitelistUpdatePayload> CODEC = new StreamCodec<>() {
         @Override
-        public WhitelistUpdatePayload decode(RegistryByteBuf buf) {
+        public WhitelistUpdatePayload decode(RegistryFriendlyByteBuf buf) {
             return WhitelistUpdatePayload.read(buf);
         }
 
         @Override
-        public void encode(RegistryByteBuf buf, WhitelistUpdatePayload payload) {
+        public void encode(RegistryFriendlyByteBuf buf, WhitelistUpdatePayload payload) {
             WhitelistUpdatePayload.write(buf, payload);
         }
     };
 
     @Override
-    public CustomPayload.Id<? extends CustomPayload> getId() {
+    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
         return ID;
     }
 
-    private static void write(RegistryByteBuf buf, WhitelistUpdatePayload payload) {
+    private static void write(RegistryFriendlyByteBuf buf, WhitelistUpdatePayload payload) {
         buf.writeBlockPos(payload.position);
         buf.writeBoolean(payload.enabled);
         buf.writeBoolean(payload.editMode);
         buf.writeVarInt(payload.items.size());
         for (Item item : payload.items) {
-            buf.writeIdentifier(Registries.ITEM.getId(item));
+            buf.writeIdentifier(BuiltInRegistries.ITEM.getKey(item));
         }
     }
 
-    private static WhitelistUpdatePayload read(RegistryByteBuf buf) {
+    private static WhitelistUpdatePayload read(RegistryFriendlyByteBuf buf) {
         BlockPos position = buf.readBlockPos();
         boolean enabled = buf.readBoolean();
         boolean editMode = buf.readBoolean();
@@ -75,7 +75,7 @@ public record WhitelistUpdatePayload(BlockPos position, boolean enabled, boolean
         }
         List<Item> items = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
-            items.add(Registries.ITEM.get(buf.readIdentifier()));
+            items.add(BuiltInRegistries.ITEM.getValue(buf.readIdentifier()));
         }
         return new WhitelistUpdatePayload(position, enabled, editMode, items);
     }
@@ -84,6 +84,6 @@ public record WhitelistUpdatePayload(BlockPos position, boolean enabled, boolean
      *  symmetric and must happen identically on both sides before either
      *  side is allowed to send it, even though only the server ever does. */
     public static void registerCodec() {
-        PayloadTypeRegistry.playS2C().register(ID, CODEC);
+        PayloadTypeRegistry.clientboundPlay().register(ID, CODEC);
     }
 }

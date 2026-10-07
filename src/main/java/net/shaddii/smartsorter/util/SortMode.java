@@ -1,11 +1,11 @@
 package net.shaddii.smartsorter.util;
 
-import net.minecraft.util.StringIdentifiable;
+import net.minecraft.util.StringRepresentable;
 
 /**
  * Defines how items should be sorted in the Storage Controller display.
  */
-public enum SortMode implements StringIdentifiable {
+public enum SortMode implements StringRepresentable {
     NAME("name"),
     COUNT("count");
 
@@ -16,7 +16,7 @@ public enum SortMode implements StringIdentifiable {
     }
 
     @Override
-    public String asString() {
+    public String getSerializedName() {
         return name;
     }
 

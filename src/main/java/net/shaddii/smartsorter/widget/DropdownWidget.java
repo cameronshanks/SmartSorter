@@ -1,21 +1,20 @@
 package net.shaddii.smartsorter.widget;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.narration.NarrationMessageBuilder;
-import net.minecraft.client.gui.screen.narration.NarrationPart;
-import net.minecraft.client.gui.widget.ClickableWidget;
-import net.minecraft.item.ItemStack;
-import net.minecraft.text.Text;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.client.gui.narration.NarratedElementType;
+import net.minecraft.client.gui.narration.NarrationElementOutput;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
 
 /**
  * Scrollable dropdown menu widget that opens upwards
  */
-public class DropdownWidget extends ClickableWidget {
+public class DropdownWidget extends AbstractWidget {
     private final List<DropdownEntry> entries = new ArrayList<>();
     private boolean isOpen = false;
     private int selectedIndex = 0;
@@ -27,7 +26,7 @@ public class DropdownWidget extends ClickableWidget {
     private static final int ENTRY_HEIGHT = 12;
     private static final int MAX_VISIBLE_ENTRIES = 6; // Reduced from 8 for better fit
 
-    public DropdownWidget(int x, int y, int width, int height, Text message) {
+    public DropdownWidget(int x, int y, int width, int height, Component message) {
         super(x, y, width, height, message);
     }
 
@@ -38,7 +37,7 @@ public class DropdownWidget extends ClickableWidget {
     public void setSelectedIndex(int index) {
         if (index >= 0 && index < entries.size()) {
             this.selectedIndex = index;
-            this.setMessage(Text.literal(entries.get(index).label));
+            this.setMessage(Component.literal(entries.get(index).label));
 
             // Auto-scroll to show selected item when dropdown opens
             if (!isOpen) {
@@ -129,7 +128,7 @@ public class DropdownWidget extends ClickableWidget {
 
     private void selectEntry(int index) {
         this.selectedIndex = index;
-        this.setMessage(Text.literal(entries.get(index).label));
+        this.setMessage(Component.literal(entries.get(index).label));
         this.isOpen = false;
 
         if (onSelect != null) {
@@ -141,8 +140,8 @@ public class DropdownWidget extends ClickableWidget {
      * Determine if dropdown should open upwards or downwards
      */
     private boolean shouldOpenUpwards() {
-        MinecraftClient client = MinecraftClient.getInstance();
-        int screenHeight = client.getWindow().getScaledHeight();
+        Minecraft client = Minecraft.getInstance();
+        int screenHeight = client.getWindow().getGuiScaledHeight();
 
         int visibleEntries = Math.min(MAX_VISIBLE_ENTRIES, entries.size());
         int dropdownHeight = visibleEntries * ENTRY_HEIGHT;
@@ -174,13 +173,13 @@ public class DropdownWidget extends ClickableWidget {
     }
 
     @Override
-    protected void appendClickableNarrations(NarrationMessageBuilder builder) {
-        builder.put(NarrationPart.TITLE, getMessage());
+    protected void updateWidgetNarration(NarrationElementOutput builder) {
+        builder.add(NarratedElementType.TITLE, getMessage());
     }
 
     @Override
-    public void renderWidget(DrawContext context, int mouseX, int mouseY, float delta) {
-        MinecraftClient client = MinecraftClient.getInstance();
+    public void extractWidgetRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+        Minecraft client = Minecraft.getInstance();
 
         // Draw main button
         int buttonColor = this.isHovered() ? 0xFF6B6B6B : 0xFF8B8B8B;
@@ -193,7 +192,7 @@ public class DropdownWidget extends ClickableWidget {
         context.fill(getX() + width - 1, getY(), getX() + width, getY() + height, 0xFF373737); // Right
 
         // Draw selected text
-        context.drawText(client.textRenderer, getMessage(),
+        context.text(client.font, getMessage(),
                 getX() + 4, getY() + (height - 8) / 2, 0xFFFFFFFF, false);
 
         // Draw dropdown arrow (changes based on direction)
@@ -203,17 +202,17 @@ public class DropdownWidget extends ClickableWidget {
         } else {
             arrow = "▼";
         }
-        context.drawText(client.textRenderer, arrow,
+        context.text(client.font, arrow,
                 getX() + width - 12, getY() + (height - 8) / 2, 0xFFFFFFFF, false);
     }
 
     /**
      * Render the dropdown list (call this separately from the main widget)
      */
-    public void renderDropdown(DrawContext context, int mouseX, int mouseY) {
+    public void renderDropdown(GuiGraphicsExtractor context, int mouseX, int mouseY) {
         if (!isOpen) return;
 
-        MinecraftClient client = MinecraftClient.getInstance();
+        Minecraft client = Minecraft.getInstance();
 
         int dropdownX = getX();
         int dropdownY = getDropdownY();
@@ -246,7 +245,7 @@ public class DropdownWidget extends ClickableWidget {
 
             // Draw entry text
             DropdownEntry entry = entries.get(actualIndex);
-            context.drawText(client.textRenderer, entry.label,
+            context.text(client.font, entry.label,
                     dropdownX + 4, entryY + 2, 0xFFFFFFFF, false);
         }
 
@@ -269,11 +268,11 @@ public class DropdownWidget extends ClickableWidget {
     /**
      * Render tooltip with item preview when shift is held
      */
-    public void renderItemPreviewTooltip(DrawContext context, int mouseX, int mouseY,
+    public void renderItemPreviewTooltip(GuiGraphicsExtractor context, int mouseX, int mouseY,
                                          int entryIndex, List<ItemStack> items) {
         if (items == null || items.isEmpty()) return;
 
-        MinecraftClient client = MinecraftClient.getInstance();
+        Minecraft client = Minecraft.getInstance();
 
         // Tooltip dimensions (2 rows × 4 columns)
         int itemsPerRow = 4;
@@ -289,7 +288,7 @@ public class DropdownWidget extends ClickableWidget {
         int tooltipY = getDropdownY() + (entryIndex * ENTRY_HEIGHT);
 
         // Ensure tooltip doesn't go off screen
-        if (tooltipX + tooltipWidth > client.getWindow().getScaledWidth()) {
+        if (tooltipX + tooltipWidth > client.getWindow().getGuiScaledWidth()) {
             tooltipX = getX() - tooltipWidth - 4; // Show on left instead
         }
 
@@ -317,18 +316,14 @@ public class DropdownWidget extends ClickableWidget {
             context.fill(itemX, itemY, itemX + 16, itemY + 16, 0x8B8B8B8B);
 
             // Draw item
-            context.drawItem(stack, itemX, itemY);
-            //? if >=1.21.8 {
-                context.drawStackOverlay(client.textRenderer, stack, itemX, itemY);
-            //?} else {
-                /*context.drawItemInSlot(client.textRenderer, stack, itemX, itemY);
-             *///?}
+            context.item(stack, itemX, itemY);
+                context.itemDecorations(client.font, stack, itemX, itemY);
 
         }
     }
 
     public boolean isShiftDown() {
-        long handle = MinecraftClient.getInstance().getWindow().getHandle();
+        long handle = Minecraft.getInstance().getWindow().handle();
         return org.lwjgl.glfw.GLFW.glfwGetKey(handle, org.lwjgl.glfw.GLFW.GLFW_KEY_LEFT_SHIFT) == org.lwjgl.glfw.GLFW.GLFW_PRESS ||
                 org.lwjgl.glfw.GLFW.glfwGetKey(handle, org.lwjgl.glfw.GLFW.GLFW_KEY_RIGHT_SHIFT) == org.lwjgl.glfw.GLFW.GLFW_PRESS;
     }
@@ -337,7 +332,7 @@ public class DropdownWidget extends ClickableWidget {
         return scrollOffset;
     }
 
-    private void drawScrollbar(DrawContext context, int dropdownX, int dropdownY, int dropdownHeight) {
+    private void drawScrollbar(GuiGraphicsExtractor context, int dropdownX, int dropdownY, int dropdownHeight) {
         int scrollbarX = dropdownX + width - 6;
         int scrollbarWidth = 4;
 

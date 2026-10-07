@@ -1,38 +1,38 @@
 package net.shaddii.smartsorter.network;
 
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 import net.shaddii.smartsorter.SmartSorter;
 
 public record ProbeStatsSyncPayload(
         BlockPos position,
         int itemsProcessed
-) implements CustomPayload {
+) implements CustomPacketPayload {
 
-    public static final CustomPayload.Id<ProbeStatsSyncPayload> ID =
-            new CustomPayload.Id<>(Identifier.of(SmartSorter.MOD_ID, "probe_stats_sync"));
+    public static final CustomPacketPayload.Type<ProbeStatsSyncPayload> ID =
+            new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath(SmartSorter.MOD_ID, "probe_stats_sync"));
 
-    public static final PacketCodec<RegistryByteBuf, ProbeStatsSyncPayload> CODEC =
-            PacketCodec.of(
+    public static final StreamCodec<RegistryFriendlyByteBuf, ProbeStatsSyncPayload> CODEC =
+            StreamCodec.ofMember(
                     (value, buf) -> write(buf, value),
                     buf -> read(buf)
             );
 
     @Override
-    public Id<? extends CustomPayload> getId() {
+    public Type<? extends CustomPacketPayload> type() {
         return ID;
     }
 
-    public static void write(RegistryByteBuf buf, ProbeStatsSyncPayload payload) {
+    public static void write(RegistryFriendlyByteBuf buf, ProbeStatsSyncPayload payload) {
         buf.writeLong(payload.position.asLong());
         buf.writeInt(payload.itemsProcessed);
     }
 
-    public static ProbeStatsSyncPayload read(RegistryByteBuf buf) {
-        BlockPos pos = BlockPos.fromLong(buf.readLong());
+    public static ProbeStatsSyncPayload read(RegistryFriendlyByteBuf buf) {
+        BlockPos pos = BlockPos.of(buf.readLong());
         int itemsProcessed = buf.readInt();
         return new ProbeStatsSyncPayload(pos, itemsProcessed);
     }

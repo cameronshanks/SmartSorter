@@ -1,12 +1,15 @@
 package net.shaddii.smartsorter.blockentity.processor;
 
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
-import net.minecraft.block.entity.AbstractFurnaceBlockEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.recipe.*;
-import net.minecraft.recipe.input.SingleStackRecipeInput;
-import net.minecraft.server.world.ServerWorld;
-
+import net.minecraft.world.item.crafting.*;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.AbstractCookingRecipe;
+import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraft.world.item.crafting.SingleRecipeInput;
+import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
 import java.util.*;
 
 /**
@@ -21,7 +24,7 @@ public class ExperienceCollector {
     /**
      * Collects experience from furnace output.
      */
-    public int collectFurnaceExperience(ServerWorld world,
+    public int collectFurnaceExperience(ServerLevel world,
                                         AbstractFurnaceBlockEntity furnace,
                                         ItemStack outputStack) {
 
@@ -49,24 +52,21 @@ public class ExperienceCollector {
     /**
      * Calculates experience for an output item.
      */
-    private float calculateExperience(ServerWorld world, ItemStack output,
+    private float calculateExperience(ServerLevel world, ItemStack output,
                                       RecipeType<?> recipeType) {
         try {
-            Collection<RecipeEntry<?>> allRecipes = world.getRecipeManager().values();
+            Collection<RecipeHolder<?>> allRecipes = world.recipeAccess().getRecipes();
 
-            for (RecipeEntry<?> recipeEntry : allRecipes) {
+            for (RecipeHolder<?> recipeEntry : allRecipes) {
                 Recipe<?> recipe = recipeEntry.value();
 
                 if (recipe.getType() != recipeType) continue;
 
                 if (recipe instanceof AbstractCookingRecipe cookingRecipe) {
-                    ItemStack recipeOutput = cookingRecipe.craft(
-                            new SingleStackRecipeInput(ItemStack.EMPTY),
-                            world.getRegistryManager()
-                    );
+                    ItemStack recipeOutput = cookingRecipe.assemble(new SingleRecipeInput(ItemStack.EMPTY));
 
-                    if (ItemStack.areItemsEqual(recipeOutput, output)) {
-                        return cookingRecipe.getExperience();
+                    if (ItemStack.isSameItem(recipeOutput, output)) {
+                        return cookingRecipe.experience();
                     }
                 }
             }
@@ -78,13 +78,13 @@ public class ExperienceCollector {
     }
 
     private RecipeType<?> getRecipeType(AbstractFurnaceBlockEntity furnace) {
-        if (furnace instanceof net.minecraft.block.entity.FurnaceBlockEntity) {
+        if (furnace instanceof net.minecraft.world.level.block.entity.FurnaceBlockEntity) {
             return RecipeType.SMELTING;
         }
-        if (furnace instanceof net.minecraft.block.entity.BlastFurnaceBlockEntity) {
+        if (furnace instanceof net.minecraft.world.level.block.entity.BlastFurnaceBlockEntity) {
             return RecipeType.BLASTING;
         }
-        if (furnace instanceof net.minecraft.block.entity.SmokerBlockEntity) {
+        if (furnace instanceof net.minecraft.world.level.block.entity.SmokerBlockEntity) {
             return RecipeType.SMOKING;
         }
         return null;

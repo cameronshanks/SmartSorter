@@ -1,52 +1,58 @@
 package net.shaddii.smartsorter.block;
 
 import com.mojang.serialization.MapCodec;
-import net.minecraft.block.*;
-import net.minecraft.block.entity.AbstractFurnaceBlockEntity;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.block.entity.BlockEntityTicker;
-import net.minecraft.block.entity.BlockEntityType;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.ItemPlacementContext;
-import net.minecraft.item.ItemStack;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.state.StateManager;
-import net.minecraft.state.property.EnumProperty;
-import net.minecraft.state.property.Properties;
-import net.minecraft.text.Text;
-import net.minecraft.util.ActionResult;
-import net.minecraft.util.Formatting;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.shape.VoxelShape;
-import net.minecraft.util.shape.VoxelShapes;
-import net.minecraft.world.BlockRenderView;
-import net.minecraft.world.BlockView;
-import net.minecraft.world.World;
+import net.minecraft.ChatFormatting;
+import net.minecraft.world.level.block.*;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.BaseEntityBlock;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.RenderShape;
+import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityTicker;
+import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.StateDefinition;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.EnumProperty;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.Shapes;
+import net.minecraft.world.phys.shapes.VoxelShape;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.blockentity.ProcessProbeBlockEntity;
 import net.shaddii.smartsorter.item.LinkingToolItem;
 
 import org.jetbrains.annotations.Nullable;
 
-public class ProcessProbeBlock extends BlockWithEntity {
+public class ProcessProbeBlock extends BaseEntityBlock {
     // ========================================
     // CONSTANTS
     // ========================================
 
-    public static final EnumProperty<Direction> FACING = Properties.FACING;
-    public static final MapCodec<ProcessProbeBlock> CODEC = createCodec(ProcessProbeBlock::new);
+    public static final EnumProperty<Direction> FACING = BlockStateProperties.FACING;
+    public static final MapCodec<ProcessProbeBlock> CODEC = simpleCodec(ProcessProbeBlock::new);
 
     // ========================================
     // CONSTRUCTOR
     // ========================================
 
-    public ProcessProbeBlock(AbstractBlock.Settings settings) {
+    public ProcessProbeBlock(BlockBehaviour.Properties settings) {
         super(settings);
-        this.setDefaultState(this.getStateManager().getDefaultState().with(FACING, Direction.NORTH));
+        this.registerDefaultState(this.getStateDefinition().any().setValue(FACING, Direction.NORTH));
     }
 
     // ========================================
@@ -54,29 +60,29 @@ public class ProcessProbeBlock extends BlockWithEntity {
     // ========================================
 
     @Override
-    protected MapCodec<? extends BlockWithEntity> getCodec() {
+    protected MapCodec<? extends BaseEntityBlock> codec() {
         return CODEC;
     }
 
     @Override
-    protected void appendProperties(StateManager.Builder<Block, BlockState> builder) {
+    protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
         builder.add(FACING);
     }
 
     @Override
-    public BlockState getPlacementState(ItemPlacementContext ctx) {
-        Direction side = ctx.getSide();
-        return this.getDefaultState().with(FACING, side.getOpposite());
+    public BlockState getStateForPlacement(BlockPlaceContext ctx) {
+        Direction side = ctx.getClickedFace();
+        return this.defaultBlockState().setValue(FACING, side.getOpposite());
     }
 
     @Override
-    public void onPlaced(World world, BlockPos pos, BlockState state, @Nullable LivingEntity placer, ItemStack itemStack) {
-        super.onPlaced(world, pos, state, placer, itemStack);
+    public void setPlacedBy(Level world, BlockPos pos, BlockState state, @Nullable LivingEntity placer, ItemStack itemStack) {
+        super.setPlacedBy(world, pos, state, placer, itemStack);
 
-        if (world.isClient() || !(world instanceof ServerWorld)) return;
+        if (world.isClientSide() || !(world instanceof ServerLevel)) return;
 
-        Direction facing = state.get(FACING);
-        BlockPos targetPos = pos.offset(facing);
+        Direction facing = state.getValue(FACING);
+        BlockPos targetPos = pos.relative(facing);
         BlockEntity targetEntity = world.getBlockEntity(targetPos);
         BlockState targetState = world.getBlockState(targetPos);
 
@@ -85,26 +91,26 @@ public class ProcessProbeBlock extends BlockWithEntity {
         boolean isValid = false;
 
         if (targetEntity instanceof AbstractFurnaceBlockEntity) {
-            if (targetState.isOf(Blocks.FURNACE)) {
+            if (targetState.is(Blocks.FURNACE)) {
                 machineType = "Furnace";
                 isValid = true;
-            } else if (targetState.isOf(Blocks.BLAST_FURNACE)) {
+            } else if (targetState.is(Blocks.BLAST_FURNACE)) {
                 machineType = "Blast Furnace";
                 isValid = true;
-            } else if (targetState.isOf(Blocks.SMOKER)) {
+            } else if (targetState.is(Blocks.SMOKER)) {
                 machineType = "Smoker";
                 isValid = true;
             }
         }
 
         // Send feedback to placer
-        if (placer instanceof ServerPlayerEntity player) {
+        if (placer instanceof ServerPlayer player) {
             if (isValid) {
-                Text message = Text.literal("Linked to " + machineType).formatted(Formatting.GREEN);
-                player.sendMessage(message, true);
+                Component message = Component.literal("Linked to " + machineType).withStyle(ChatFormatting.GREEN);
+                player.sendOverlayMessage(message);
             } else {
-                Text message = Text.literal("No valid processing machine found").formatted(Formatting.RED);
-                player.sendMessage(message, true);
+                Component message = Component.literal("No valid processing machine found").withStyle(ChatFormatting.RED);
+                player.sendOverlayMessage(message);
             }
         }
     }
@@ -114,13 +120,13 @@ public class ProcessProbeBlock extends BlockWithEntity {
     // ========================================
 
     @Override
-    public BlockEntity createBlockEntity(BlockPos pos, BlockState state) {
+    public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
         return new ProcessProbeBlockEntity(pos, state);
     }
 
     @Override
-    public <T extends BlockEntity> BlockEntityTicker<T> getTicker(World world, BlockState state, BlockEntityType<T> type) {
-        if (world == null || world.isClient()) return null;
+    public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level world, BlockState state, BlockEntityType<T> type) {
+        if (world == null || world.isClientSide()) return null;
         return type == SmartSorter.PROCESS_PROBE_BE_TYPE
                 ? (world1, pos, state1, be) -> ProcessProbeBlockEntity.tick(world1, pos, state1, (ProcessProbeBlockEntity) be)
                 : null;
@@ -131,18 +137,18 @@ public class ProcessProbeBlock extends BlockWithEntity {
     // ========================================
 
     @Override
-    protected ActionResult onUse(BlockState state, World world, BlockPos pos, PlayerEntity player, BlockHitResult hit) {
-        if (world == null) return ActionResult.PASS;
-        if (world.isClient()) return ActionResult.SUCCESS;
+    protected InteractionResult useWithoutItem(BlockState state, Level world, BlockPos pos, Player player, BlockHitResult hit) {
+        if (world == null) return InteractionResult.PASS;
+        if (world.isClientSide()) return InteractionResult.SUCCESS;
 
         BlockEntity be = world.getBlockEntity(pos);
         if (!(be instanceof ProcessProbeBlockEntity probe)) {
-            return ActionResult.PASS;
+            return InteractionResult.PASS;
         }
 
-        ItemStack held = player.getMainHandStack();
+        ItemStack held = player.getMainHandItem();
         if (held.getItem() instanceof LinkingToolItem) {
-            return ActionResult.PASS;
+            return InteractionResult.PASS;
         }
 
         // Show status
@@ -151,23 +157,23 @@ public class ProcessProbeBlock extends BlockWithEntity {
         int processed = probe.getProcessedCount();
         boolean enabled = probe.isEnabled();
 
-        Text message = Text.literal(
-                String.format("§7Process Probe §8[§b%s§8]\n", state.get(FACING).asString()) +
+        Component message = Component.literal(
+                String.format("§7Process Probe §8[§b%s§8]\n", state.getValue(FACING).getSerializedName()) +
                         String.format("§7Machine: §f%s\n", machineType) +
                         String.format("§7Status: %s\n", status) +
                         String.format("§7Processed: §f%d items\n", processed) +
                         String.format("§7Mode: %s", enabled ? "§aEnabled" : "§cDisabled")
         );
 
-        player.sendMessage(message, false);
-        return ActionResult.SUCCESS;
+        player.sendSystemMessage(message);
+        return InteractionResult.SUCCESS;
     }
 
-    protected void neighborUpdate(BlockState state, World world, BlockPos pos, Block sourceBlock, BlockPos sourcePos, boolean notify) {
-        if (world != null && !world.isClient()) {
+    protected void neighborUpdate(BlockState state, Level world, BlockPos pos, Block sourceBlock, BlockPos sourcePos, boolean notify) {
+        if (world != null && !world.isClientSide()) {
             BlockEntity be = world.getBlockEntity(pos);
             if (be instanceof ProcessProbeBlockEntity probe) {
-                boolean powered = world.isReceivingRedstonePower(pos);
+                boolean powered = world.hasNeighborSignal(pos);
                 probe.setEnabled(powered);
             }
         }
@@ -178,49 +184,24 @@ public class ProcessProbeBlock extends BlockWithEntity {
     // ========================================
 
     @Override
-    public BlockRenderType getRenderType(BlockState state) {
-        return BlockRenderType.MODEL;
+    public RenderShape getRenderShape(BlockState state) {
+        return RenderShape.MODEL;
     }
 
     // ========================================
     // CLEANUP
     // ========================================
 
-    //? if >= 1.21.8 {
-    @Override
-    protected void onStateReplaced(BlockState state, ServerWorld world, BlockPos pos, boolean moved) {
-        BlockState currentState = world.getBlockState(pos);
-        if (state.isOf(currentState.getBlock())) return;
-
-        BlockEntity be = world.getBlockEntity(pos);
-        if (be instanceof ProcessProbeBlockEntity probe) {
-            probe.onRemoved();
-        }
-
-        super.onStateReplaced(state, world, pos, moved);
-    }
-    //?} else {
-    /*@Override
-    public void onStateReplaced(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
-        if (state.isOf(newState.getBlock())) return;
-
-        BlockEntity be = world.getBlockEntity(pos);
-        if (be instanceof ProcessProbeBlockEntity probe) {
-            probe.onRemoved();
-        }
-
-        super.onStateReplaced(state, world, pos, newState, moved);
-    }
-    *///?}
+    // Unregistering runs in ProcessProbeBlockEntity.preRemoveSideEffects.
 
     // ========================================
     // COMPATIBILITY
     // ========================================
 
     @Override
-    public VoxelShape getOutlineShape(BlockState state, BlockView world, BlockPos pos, ShapeContext context) {
+    public VoxelShape getShape(BlockState state, BlockGetter world, BlockPos pos, CollisionContext context) {
         // Define the actual shape of your block for proper culling
         // This example uses full cube, adjust if your blocks are smaller
-        return VoxelShapes.fullCube();
+        return Shapes.block();
     }
 }

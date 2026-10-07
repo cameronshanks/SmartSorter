@@ -1,25 +1,25 @@
 package net.shaddii.smartsorter.network;
 
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.util.Category;
 import net.shaddii.smartsorter.util.CategoryManager;
 
-public record FilterCategoryChangePayload(String categoryId) implements CustomPayload {
-    public static final CustomPayload.Id<FilterCategoryChangePayload> ID =
-            new CustomPayload.Id<>(Identifier.of(SmartSorter.MOD_ID, "filter_category_change"));
+public record FilterCategoryChangePayload(String categoryId) implements CustomPacketPayload {
+    public static final CustomPacketPayload.Type<FilterCategoryChangePayload> ID =
+            new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath(SmartSorter.MOD_ID, "filter_category_change"));
 
-    public static final PacketCodec<RegistryByteBuf, FilterCategoryChangePayload> CODEC =
-            PacketCodec.of(
-                    (value, buf) -> buf.writeString(value.categoryId()),
-                    buf -> new FilterCategoryChangePayload(buf.readString())
+    public static final StreamCodec<RegistryFriendlyByteBuf, FilterCategoryChangePayload> CODEC =
+            StreamCodec.ofMember(
+                    (value, buf) -> buf.writeUtf(value.categoryId()),
+                    buf -> new FilterCategoryChangePayload(buf.readUtf())
             );
 
     @Override
-    public Id<? extends CustomPayload> getId() {
+    public Type<? extends CustomPacketPayload> type() {
         return ID;
     }
 

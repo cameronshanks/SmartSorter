@@ -1,16 +1,11 @@
 package net.shaddii.smartsorter.widget;
 
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
-//? if >=1.21.9 {
-import net.minecraft.client.gui.Click;
-import net.minecraft.client.input.MouseInput;
-//?}
-//? if <=1.21.1 {
-/*import net.minecraft.client.util.math.MatrixStack;
-*///?}
-import net.minecraft.text.Text;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.input.MouseButtonInfo;
+import net.minecraft.network.chat.Component;
 import net.shaddii.smartsorter.network.ProbeConfigUpdatePayload;
 import net.shaddii.smartsorter.util.FuelFilterMode;
 import net.shaddii.smartsorter.util.ProcessProbeConfig;
@@ -25,7 +20,7 @@ public class ProbeConfigPanel {
     private boolean previousEnabledState = false;
 
     private final int x, y, width, height;
-    private final TextRenderer textRenderer;
+    private final Font textRenderer;
 
     private ProcessProbeConfig config;
 
@@ -43,7 +38,7 @@ public class ProbeConfigPanel {
     private static final int DROPDOWN_WIDTH = 80;
     private static final int DROPDOWN_HEIGHT = 10;
 
-    public ProbeConfigPanel(int x, int y, int width, int height, TextRenderer textRenderer) {
+    public ProbeConfigPanel(int x, int y, int width, int height, Font textRenderer) {
         this.x = x;
         this.y = y;
         this.width = width;
@@ -57,7 +52,7 @@ public class ProbeConfigPanel {
         int innerX = x + PADDING;
         int innerY = y + 18;
 
-        enabledCheckbox = CheckboxWidget.builder(Text.literal("Enabled"), textRenderer)
+        enabledCheckbox = CheckboxWidget.builder(Component.literal("Enabled"), textRenderer)
                 .pos(innerX, innerY)
                 .dimensions(55, 9)
                 .callback(this::onEnabledChanged)
@@ -66,13 +61,13 @@ public class ProbeConfigPanel {
         recipeFilterDropdown = new DropdownWidget(
                 innerX + 35, innerY + 12,
                 DROPDOWN_WIDTH, DROPDOWN_HEIGHT,
-                Text.literal("")
+                Component.literal("")
         );
 
         fuelFilterDropdown = new DropdownWidget(
                 innerX + 35, innerY + 25,
                 DROPDOWN_WIDTH, DROPDOWN_HEIGHT,
-                Text.literal("")
+                Component.literal("")
         );
     }
 
@@ -173,16 +168,16 @@ public class ProbeConfigPanel {
         }
     }
 
-    private void drawCenteredError(DrawContext context, String error, int yPos) {
+    private void drawCenteredError(GuiGraphicsExtractor context, String error, int yPos) {
         float scale = 0.6f;
-        int textWidth = (int)(textRenderer.getWidth(error) * scale);
+        int textWidth = (int)(textRenderer.width(error) * scale);
         int centerX = x + (width / 2) - (textWidth / 2);  // Center horizontally
 
         drawScaledText(context, "§c" + error, centerX, yPos, 0xFFFF5555, scale);
     }
 
 
-    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
 
         drawBackground(context);
 
@@ -197,7 +192,7 @@ public class ProbeConfigPanel {
         currentY = drawMachineInfo(context, currentY);
 
         currentY += 7;
-        enabledCheckbox.render(context, mouseX, mouseY, delta);
+        enabledCheckbox.extractRenderState(context, mouseX, mouseY, delta);
 
         currentY += LINE_HEIGHT;
         currentY = drawRecipeFilter(context, currentY, mouseX, mouseY, delta);
@@ -221,22 +216,22 @@ public class ProbeConfigPanel {
         renderDropdowns(context, mouseX, mouseY);
     }
 
-    private void drawBackground(DrawContext context) {
+    private void drawBackground(GuiGraphicsExtractor context) {
         context.fill(x, y, x + width, y + height, 0xFF2B2B2B);
         context.fill(x + 1, y + 1, x + width - 1, y + height - 1, 0xFF3C3C3C);
     }
 
-    private void drawNoProbeMessage(DrawContext context) {
+    private void drawNoProbeMessage(GuiGraphicsExtractor context) {
         String message = "No probe selected";
         float scale = 0.65f;
-        int scaledTextWidth = (int)(textRenderer.getWidth(message) * scale);
+        int scaledTextWidth = (int)(textRenderer.width(message) * scale);
         int textX = x + width / 2 - scaledTextWidth / 2;
         int textY = y + height / 2 - 4;
 
         drawScaledText(context, message, textX, textY, 0xFF888888, scale);
     }
 
-    private int drawTitle(DrawContext context, int currentY) {
+    private int drawTitle(GuiGraphicsExtractor context, int currentY) {
         String title = "Configuration";
         String statusIcon = "";
         int statusColor = 0xFFFFFFFF;
@@ -262,7 +257,7 @@ public class ProbeConfigPanel {
         return currentY + 8;
     }
 
-    private int drawMachineInfo(DrawContext context, int currentY) {
+    private int drawMachineInfo(GuiGraphicsExtractor context, int currentY) {
         int innerX = x + PADDING;
 
         String machineInfo = "§7Type: §e" + config.machineType;
@@ -273,14 +268,14 @@ public class ProbeConfigPanel {
                 config.position.getY(),
                 config.position.getZ());
 
-        int machineTextWidth = (int)(textRenderer.getWidth(machineInfo) * 0.65f);
+        int machineTextWidth = (int)(textRenderer.width(machineInfo) * 0.65f);
         int locationX = innerX + machineTextWidth + 3;
         drawScaledText(context, location, locationX, currentY, 0xFFAAAAAA, 0.65f);
 
         return currentY;
     }
 
-    private int drawRecipeFilter(DrawContext context, int currentY, int mouseX, int mouseY, float delta) {
+    private int drawRecipeFilter(GuiGraphicsExtractor context, int currentY, int mouseX, int mouseY, float delta) {
         int innerX = x + PADDING;
 
         drawScaledText(context, "§7Recipe:", innerX, currentY + 1, 0xFFAAAAAA, 0.65f);
@@ -292,18 +287,18 @@ public class ProbeConfigPanel {
             drawScaledText(context, "§c(Invalid)", dropdownEndX + 2, currentY + 1, 0xFFFF5555, 0.7f);
         }
 
-        recipeFilterDropdown.render(context, mouseX, mouseY, delta);
+        recipeFilterDropdown.extractRenderState(context, mouseX, mouseY, delta);
 
         return currentY;
     }
 
-    private void drawFuelFilter(DrawContext context, int currentY, int mouseX, int mouseY, float delta) {
+    private void drawFuelFilter(GuiGraphicsExtractor context, int currentY, int mouseX, int mouseY, float delta) {
         int innerX = x + PADDING;
         drawScaledText(context, "§7Fuel:", innerX, currentY + 1, 0xFFAAAAAA, 0.65f);
-        fuelFilterDropdown.render(context, mouseX, mouseY, delta);
+        fuelFilterDropdown.extractRenderState(context, mouseX, mouseY, delta);
     }
 
-    private void drawStatistics(DrawContext context, int currentY) {
+    private void drawStatistics(GuiGraphicsExtractor context, int currentY) {
         int innerX = x + PADDING;
 
         String statusText;
@@ -321,7 +316,7 @@ public class ProbeConfigPanel {
         drawScaledText(context, stats, innerX, currentY, 0xFFFFFFFF, 0.65f);
     }
 
-    private void drawWarningIcon(DrawContext context, int iconX, int iconY) {
+    private void drawWarningIcon(GuiGraphicsExtractor context, int iconX, int iconY) {
         long elapsed = System.currentTimeMillis() - warningStartTime;
         boolean showWarning = (elapsed / WARNING_BLINK_DURATION) % 2 == 0;
 
@@ -329,27 +324,18 @@ public class ProbeConfigPanel {
         }
     }
 
-    private void drawScaledText(DrawContext context, String text, int x, int y, int color, float scale) {
-        //? if >=1.21.8 {
+    private void drawScaledText(GuiGraphicsExtractor context, String text, int x, int y, int color, float scale) {
         
-        Matrix3x2f oldMatrix = new Matrix3x2f(context.getMatrices());
+        Matrix3x2f oldMatrix = new Matrix3x2f(context.pose());
         Matrix3x2f scaleMatrix = new Matrix3x2f().scaling(scale, scale);
-        context.getMatrices().mul(scaleMatrix);
+        context.pose().mul(scaleMatrix);
         Matrix3x2f translateMatrix = new Matrix3x2f().translation(x / scale, y / scale);
-        context.getMatrices().mul(translateMatrix);
-        context.drawText(textRenderer, text, 0, 0, color, false);
-        context.getMatrices().set(oldMatrix);
-        //?} else {
-            /*MatrixStack matrices = context.getMatrices();
-            matrices.push();
-            matrices.scale(scale, scale, scale);
-            matrices.translate(x / scale, y / scale, 0);
-            context.drawText(textRenderer, text, 0, 0, color, false);
-            matrices.pop();
-        *///?}
+        context.pose().mul(translateMatrix);
+        context.text(textRenderer, text, 0, 0, color, false);
+        context.pose().set(oldMatrix);
     }
 
-    private void renderDropdowns(DrawContext context, int mouseX, int mouseY) {
+    private void renderDropdowns(GuiGraphicsExtractor context, int mouseX, int mouseY) {
         if (recipeFilterDropdown != null && recipeFilterDropdown.isOpen()) {
             recipeFilterDropdown.renderDropdown(context, mouseX, mouseY);
         }
@@ -358,12 +344,11 @@ public class ProbeConfigPanel {
         }
     }
 
-    //? if >=1.21.9 {
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (config == null) return false;
 
-        MouseInput mouseInput = new MouseInput(button, 0);
-        Click click = new Click(mouseX, mouseY, mouseInput);
+        MouseButtonInfo mouseInput = new MouseButtonInfo(button, 0);
+        MouseButtonEvent click = new MouseButtonEvent(mouseX, mouseY, mouseInput);
 
         if (enabledCheckbox.mouseClicked(click, false)) {
             return true;
@@ -377,31 +362,6 @@ public class ProbeConfigPanel {
 
         return false;
     }
-    //?} else {
-    /*public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (config == null) return false;
-
-        // Check checkbox bounds manually
-        int cx = enabledCheckbox.getX();
-        int cy = enabledCheckbox.getY();
-        int cw = enabledCheckbox.getWidth();
-        int ch = enabledCheckbox.getHeight();
-
-        if (mouseX >= cx && mouseX < cx + cw && mouseY >= cy && mouseY < cy + ch) {
-            enabledCheckbox.onClick(mouseX, mouseY);
-            return true;
-        }
-
-        if (recipeFilterDropdown.mouseClicked(mouseX, mouseY, button)) {
-            return true;
-        }
-        if (fuelFilterDropdown.mouseClicked(mouseX, mouseY, button)) {
-            return true;
-        }
-
-        return false;
-    }
-    *///?}
     
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontal, double vertical) {
         if (recipeFilterDropdown.isOpen()) {

@@ -1,15 +1,12 @@
 package net.shaddii.smartsorter.screen.tabs;
 
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.widget.TextFieldWidget;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.input.CharacterEvent;
+import net.minecraft.client.input.KeyEvent;
 import net.shaddii.smartsorter.screen.StorageControllerScreen;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
 import net.shaddii.smartsorter.widget.ChestConfigPanel;
-
-//? if >=1.21.9 {
-import net.minecraft.client.input.KeyInput;
-import net.minecraft.client.input.CharInput;
-//?}
 
 public abstract class TabComponent {
     protected final StorageControllerScreen parent;
@@ -27,36 +24,20 @@ public abstract class TabComponent {
     }
 
     // Helper methods for version-specific input handling
-    protected boolean handleKeyPress(TextFieldWidget widget, int keyCode, int scanCode, int modifiers) {
-        //? if >=1.21.9 {
-        return widget.keyPressed(new KeyInput(keyCode, scanCode, modifiers));
-        //?} else {
-        /*return widget.keyPressed(keyCode, scanCode, modifiers);
-         *///?}
+    protected boolean handleKeyPress(EditBox widget, int keyCode, int scanCode, int modifiers) {
+        return widget.keyPressed(new KeyEvent(keyCode, scanCode, modifiers));
     }
 
     protected boolean handleKeyPress(ChestConfigPanel widget, int keyCode, int scanCode, int modifiers) {
-        //? if >=1.21.9 {
-        return widget.keyPressed(new KeyInput(keyCode, scanCode, modifiers));
-        //?} else {
-        /*return widget.keyPressed(keyCode, scanCode, modifiers);
-         *///?}
+        return widget.keyPressed(new KeyEvent(keyCode, scanCode, modifiers));
     }
 
-    protected boolean handleCharType(TextFieldWidget widget, char chr, int modifiers) {
-        //? if >=1.21.9 {
-        return widget.charTyped(new CharInput(chr, modifiers));
-        //?} else {
-        /*return widget.charTyped(chr, modifiers);
-         *///?}
+    protected boolean handleCharType(EditBox widget, char chr, int modifiers) {
+        return widget.charTyped(new CharacterEvent(chr));
     }
 
     protected boolean handleCharType(ChestConfigPanel widget, char chr, int modifiers) {
-        //? if >=1.21.9 {
-        return widget.charTyped(new CharInput(chr, modifiers));
-        //?} else {
-        /*return widget.charTyped(chr, modifiers);
-         *///?}
+        return widget.charTyped(new CharacterEvent(chr));
     }
 
     public void init(int guiX, int guiY) {
@@ -67,7 +48,7 @@ public abstract class TabComponent {
 
     protected abstract void initWidgets();
 
-    public abstract void render(DrawContext context, int mouseX, int mouseY, float delta);
+    public abstract void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta);
 
     public abstract boolean mouseClicked(double mouseX, double mouseY, int button);
 

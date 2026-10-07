@@ -1,11 +1,10 @@
 plugins {
-    id 'fabric-loom' version '1.15-SNAPSHOT'
+    id 'net.fabricmc.fabric-loom' version '1.18-SNAPSHOT'
     id 'maven-publish'
 }
 
 // Stonecutter properties
 def mcVersion = stonecutter.current.project
-def isNewInputSystem = stonecutter.compare(mcVersion, "1.21.9") >= 0
 
 base {
     archivesName = "smartsorter-${mcVersion}"
@@ -32,10 +31,9 @@ repositories {
 
 dependencies {
     minecraft "com.mojang:minecraft:${mcVersion}"
-    mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
 
-    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
-    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
 }
 
 processResources {
@@ -49,14 +47,14 @@ processResources {
 }
 
 java {
-    toolchain { languageVersion = JavaLanguageVersion.of(21) }
+    toolchain { languageVersion = JavaLanguageVersion.of(25) }
     // DON'T generate sources jar (causes OutOfMemory with multi-version builds)
     // withSourcesJar()  ← REMOVED
 }
 
 tasks.withType(JavaCompile).configureEach {
     it.options.encoding = "UTF-8"
-    it.options.release = 21
+    it.options.release = 25
 
     // MEMORY FIX for compilation
     it.options.fork = true

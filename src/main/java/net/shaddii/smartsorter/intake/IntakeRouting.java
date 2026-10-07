@@ -6,11 +6,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
-import net.minecraft.block.entity.HopperBlockEntity;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.HopperBlockEntity;
 import net.shaddii.smartsorter.blockentity.IntakeBlockEntity;
 import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
@@ -28,9 +28,9 @@ public final class IntakeRouting {
     }
 
     /** The linked controller, or null if unlinked, missing, or its chunk isn't loaded. */
-    public static StorageControllerBlockEntity controllerOf(World world, IntakeBlockEntity intake) {
+    public static StorageControllerBlockEntity controllerOf(Level world, IntakeBlockEntity intake) {
         BlockPos controllerPos = intake.getController();
-        if (controllerPos == null || !world.isChunkLoaded(controllerPos)) {
+        if (controllerPos == null || !world.hasChunkAt(controllerPos)) {
             return null;
         }
         return world.getBlockEntity(controllerPos) instanceof StorageControllerBlockEntity controller ? controller : null;
@@ -41,7 +41,7 @@ public final class IntakeRouting {
      * remainder (a new stack; {@code stack} itself is not modified), or null
      * when the intake has no usable destination right now.
      */
-    public static ItemStack route(World world, IntakeBlockEntity intake, ItemStack stack) {
+    public static ItemStack route(Level world, IntakeBlockEntity intake, ItemStack stack) {
         if (intake.isInManagedMode()) {
             StorageControllerBlockEntity controller = controllerOf(world, intake);
             return controller == null ? null : controller.insertItem(stack).remainder();
@@ -52,17 +52,17 @@ public final class IntakeRouting {
         return null;
     }
 
-    private static ItemStack insertIntoDirectOutputs(World world, IntakeBlockEntity intake, ItemStack stack) {
+    private static ItemStack insertIntoDirectOutputs(Level world, IntakeBlockEntity intake, ItemStack stack) {
         ItemVariant variant = ItemVariant.of(stack);
         ItemStack current = stack.copy();
         List<BlockPos> outputs = intake.getOutputs();
         for (int i = 0; i < outputs.size() && !current.isEmpty(); i++) {
             BlockPos probePos = outputs.get(i);
-            if (!world.isChunkLoaded(probePos)) {
+            if (!world.hasChunkAt(probePos)) {
                 continue;
             }
             if (world.getBlockEntity(probePos) instanceof OutputProbeBlockEntity probe && probe.accepts(variant)) {
-                Inventory inv = probe.getTargetInventory();
+                Container inv = probe.getTargetInventory();
                 if (inv != null) {
                     insertInto(inv, current);
                 }
@@ -78,49 +78,49 @@ public final class IntakeRouting {
      * in place (no toStack()); the only allocation is the new stack object
      * placed into an empty slot.
      */
-    public static int insertInto(Inventory inv, ItemStack stack) {
+    public static int insertInto(Container inv, ItemStack stack) {
         int original = stack.getCount();
-        int maxStackSize = Math.min(stack.getMaxCount(), inv.getMaxCountPerStack());
-        int size = inv.size();
+        int maxStackSize = Math.min(stack.getMaxStackSize(), inv.getMaxStackSize());
+        int size = inv.getContainerSize();
         boolean changed = false;
 
         for (int i = 0; i < size && !stack.isEmpty(); i++) {
-            ItemStack slot = inv.getStack(i);
-            if (!slot.isEmpty() && ItemStack.areItemsAndComponentsEqual(slot, stack)) {
+            ItemStack slot = inv.getItem(i);
+            if (!slot.isEmpty() && ItemStack.isSameItemSameComponents(slot, stack)) {
                 int room = maxStackSize - slot.getCount();
                 if (room > 0) {
                     int moved = Math.min(room, stack.getCount());
-                    slot.increment(moved);
-                    stack.decrement(moved);
+                    slot.grow(moved);
+                    stack.shrink(moved);
                     changed = true;
                 }
             }
         }
         for (int i = 0; i < size && !stack.isEmpty(); i++) {
-            if (inv.getStack(i).isEmpty()) {
+            if (inv.getItem(i).isEmpty()) {
                 int moved = Math.min(maxStackSize, stack.getCount());
-                inv.setStack(i, stack.copyWithCount(moved));
-                stack.decrement(moved);
+                inv.setItem(i, stack.copyWithCount(moved));
+                stack.shrink(moved);
                 changed = true;
             }
         }
 
         if (changed) {
-            inv.markDirty();
+            inv.setChanged();
         }
         return original - stack.getCount();
     }
 
     /** The configured overflow chest (or probe's target chest), if set and loaded. */
-    private static Inventory overflowInventory(World world) {
+    private static Container overflowInventory(Level world) {
         BlockPos target = SmartSorterConfig.stuckOverflowTarget;
-        if (target == null || !world.isChunkLoaded(target)) {
+        if (target == null || !world.hasChunkAt(target)) {
             return null;
         }
         if (world.getBlockEntity(target) instanceof OutputProbeBlockEntity probe) {
             return probe.getTargetInventory();
         }
-        return HopperBlockEntity.getInventoryAt(world, target);
+        return HopperBlockEntity.getContainerAt(world, target);
     }
 
     /**
@@ -128,7 +128,7 @@ public final class IntakeRouting {
      * anything moved. Entries that still can't go anywhere wait another
      * stuckRetryTicks, so they cost nothing in between.
      */
-    public static boolean routeBuffered(World world, IntakeBlockEntity intake, IntakeBuffer buffer, long now) {
+    public static boolean routeBuffered(Level world, IntakeBlockEntity intake, IntakeBuffer buffer, long now) {
         boolean moved = false;
         long retryAt = now + SmartSorterConfig.stuckRetryTicks;
         List<IntakeBuffer.Entry> entries = buffer.entries();
@@ -145,7 +145,7 @@ public final class IntakeRouting {
                 remainder = entry.stack;
             }
             if (!remainder.isEmpty()) {
-                Inventory overflow = overflowInventory(world);
+                Container overflow = overflowInventory(world);
                 if (overflow != null) {
                     remainder = remainder == entry.stack ? remainder.copy() : remainder;
                     insertInto(overflow, remainder);
@@ -166,9 +166,9 @@ public final class IntakeRouting {
             if (!entry.stuck) {
                 entry.stuck = true;
                 if (SmartSorterConfig.logStuckItems) {
-                    BlockPos pos = intake.getPos();
+                    BlockPos pos = intake.getBlockPos();
                     LOGGER.info("[Smart Sorter] Intake at {} {} {}: {}x {} has no destination with room; buffered, retrying every {} ticks",
-                            pos.getX(), pos.getY(), pos.getZ(), remainder.getCount(), remainder.getName().getString(),
+                            pos.getX(), pos.getY(), pos.getZ(), remainder.getCount(), remainder.getHoverName().getString(),
                             SmartSorterConfig.stuckRetryTicks);
                 }
             }

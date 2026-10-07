@@ -1,21 +1,19 @@
 package net.shaddii.smartsorter.widget;
 
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.Drawable;
-import net.minecraft.client.gui.Element;
-import net.minecraft.client.gui.Selectable;
-import net.minecraft.client.gui.screen.narration.NarrationMessageBuilder;
-import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.client.gui.widget.ButtonWidget;
-//? if >=1.21.9 {
-import net.minecraft.client.gui.Click;
-import net.minecraft.client.input.CharInput;
-import net.minecraft.client.input.KeyInput;
-import net.minecraft.client.input.MouseInput;
-//?}
-import net.minecraft.text.Text;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Renderable;
+import net.minecraft.client.gui.components.events.GuiEventListener;
+import net.minecraft.client.gui.narration.NarratableEntry;
+import net.minecraft.client.gui.narration.NarrationElementOutput;
+import net.minecraft.client.input.CharacterEvent;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.input.MouseButtonInfo;
+import net.minecraft.network.chat.Component;
 import net.shaddii.smartsorter.network.ChestConfigUpdatePayload;
 import net.shaddii.smartsorter.util.Category;
 import net.shaddii.smartsorter.util.CategoryManager;
@@ -26,21 +24,23 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
-public class ChestConfigPanel implements Drawable, Element, Selectable {
+public class ChestConfigPanel implements Renderable, GuiEventListener, NarratableEntry {
     private final int x, y, width, height;
-    private final TextRenderer textRenderer;
+    private final Font textRenderer;
 
     private ChestConfig currentConfig;
+
+    private boolean applyingConfig = false;
     private Consumer<ChestConfig> onConfigUpdate;
 
     // Widgets
     private DropdownWidget categoryDropdown;
     private DropdownWidget filterModeDropdown;
     private CheckboxWidget strictNBTCheckbox;
-    private TextFieldWidget priorityField;
+    private EditBox priorityField;
     private DropdownWidget priorityDropdown;
-    private TextFieldWidget nameField;
-    private ButtonWidget renameButton;
+    private EditBox nameField;
+    private Button renameButton;
     private int maxPriority = 1;
     private final boolean showHeader;
     private boolean externalDropdownOpen = false;
@@ -55,7 +55,7 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
     private final boolean showRenameButton;
 
 
-    public ChestConfigPanel(int x, int y, int width, int height, TextRenderer textRenderer, boolean showRenameButton, boolean showHeader) {
+    public ChestConfigPanel(int x, int y, int width, int height, Font textRenderer, boolean showRenameButton, boolean showHeader) {
         this.x = x;
         this.y = y;
         this.width = width;
@@ -67,11 +67,11 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
         initWidgets();
     }
 
-    public ChestConfigPanel(int x, int y, int width, int height, TextRenderer textRenderer, boolean showRenameButton) {
+    public ChestConfigPanel(int x, int y, int width, int height, Font textRenderer, boolean showRenameButton) {
         this(x, y, width, height, textRenderer, showRenameButton, true);
     }
 
-    public ChestConfigPanel(int x, int y, int width, int height, TextRenderer textRenderer) {
+    public ChestConfigPanel(int x, int y, int width, int height, Font textRenderer) {
         this(x, y, width, height, textRenderer, false, true);
     }
 
@@ -81,19 +81,19 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
 
         // Name field (initially hidden)
         if (showRenameButton) {
-            nameField = new TextFieldWidget(textRenderer, innerX, innerY, width - PADDING * 2 - 45, 10, Text.literal(""));
+            nameField = new EditBox(textRenderer, innerX, innerY, width - PADDING * 2 - 45, 10, Component.literal(""));
             nameField.setMaxLength(32);
             nameField.setVisible(false);
-            nameField.setChangedListener(this::onNameChanged);
+            nameField.setResponder(this::onNameChanged);
 
-            renameButton = ButtonWidget.builder(Text.literal("✎"), btn -> toggleRename())
-                    .dimensions(innerX + width - PADDING * 2 - 40, innerY, 35, 10)
+            renameButton = Button.builder(Component.literal("✎"), btn -> toggleRename())
+                    .bounds(innerX + width - PADDING * 2 - 40, innerY, 35, 10)
                     .build();
 
             innerY += 13; // Adjust for name field space
         }
 
-        categoryDropdown = new DropdownWidget(innerX, innerY, 80, 10, Text.literal(""));
+        categoryDropdown = new DropdownWidget(innerX, innerY, 80, 10, Component.literal(""));
         List<Category> allCategories = CategoryManager.getInstance().getAllCategories();
         for (Category category : allCategories) {
             categoryList.add(category);
@@ -103,26 +103,26 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
 
         if (!showHeader) {
             // Probe screen - simple dropdown
-            priorityDropdown = new DropdownWidget(innerX + 35, innerY, 70, 10, Text.literal(""));
+            priorityDropdown = new DropdownWidget(innerX + 35, innerY, 70, 10, Component.literal(""));
             for (ChestConfig.SimplePriority sp : ChestConfig.SimplePriority.values()) {
                 priorityDropdown.addEntry(sp.getDisplayName(), sp.getDescription());
             }
             priorityDropdown.setOnSelect(this::onPriorityDropdownChanged);
         } else {
             // Controller screen - numeric input
-            priorityField = new TextFieldWidget(textRenderer, innerX + 35, innerY, 30, 10, Text.literal(""));
+            priorityField = new EditBox(textRenderer, innerX + 35, innerY, 30, 10, Component.literal(""));
             priorityField.setMaxLength(3);
-            priorityField.setText("1");
-            priorityField.setChangedListener(this::onPriorityChanged);
+            priorityField.setValue("1");
+            priorityField.setResponder(this::onPriorityChanged);
         }
 
-        filterModeDropdown = new DropdownWidget(innerX + 35, innerY + 36, 100, 10, Text.literal(""));
+        filterModeDropdown = new DropdownWidget(innerX + 35, innerY + 36, 100, 10, Component.literal(""));
         for (ChestConfig.FilterMode mode : ChestConfig.FilterMode.values()) {
             filterModeDropdown.addEntry(mode.getDisplayName(), mode.getDisplayName());
         }
         filterModeDropdown.setOnSelect(this::onFilterModeChanged);
 
-        strictNBTCheckbox = CheckboxWidget.builder(Text.literal("Match NBT"), textRenderer)
+        strictNBTCheckbox = CheckboxWidget.builder(Component.literal("Match NBT"), textRenderer)
                 .pos(innerX, innerY + 50)
                 .dimensions(60, 9)
                 .checked(false)
@@ -138,13 +138,13 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
         if (isRenaming) {
             nameField.setFocused(true);
             if (currentConfig != null && currentConfig.customName != null) {
-                nameField.setText(currentConfig.customName);
+                nameField.setValue(currentConfig.customName);
             }
         } else {
             nameField.setFocused(false);
             // Save on close
-            if (currentConfig != null && !nameField.getText().equals(currentConfig.customName)) {
-                currentConfig.customName = nameField.getText();
+            if (currentConfig != null && !nameField.getValue().equals(currentConfig.customName)) {
+                currentConfig.customName = nameField.getValue();
                 notifyUpdate();
             }
         }
@@ -156,7 +156,7 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
     }
 
     private void onPriorityChanged(String text) {
-        if (currentConfig == null || text.isEmpty()) return;
+        if (applyingConfig || currentConfig == null || text.isEmpty()) return;
         try {
             int value = Integer.parseInt(text);
             if (value < 1) value = 1;
@@ -220,15 +220,25 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
     }
 
     public void setConfig(ChestConfig config) {
+        // Filling the fields in must not count as the user editing them
+        applyingConfig = true;
+        try {
+            applyConfig(config);
+        } finally {
+            applyingConfig = false;
+        }
+    }
+
+    private void applyConfig(ChestConfig config) {
         this.currentConfig = config;
         if (config == null) {
             categoryDropdown.setSelectedIndex(0);
-            priorityField.setText("1");
+            priorityField.setValue("1");
             filterModeDropdown.setSelectedIndex(0);
 
             // Only clear nameField if it exists
             if (nameField != null) {
-                nameField.setText("");
+                nameField.setValue("");
                 nameField.setVisible(false);
             }
             isRenaming = false;
@@ -251,8 +261,8 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
             priorityDropdown.setSelectedIndex(sp.ordinal());
         } else if (priorityField != null) {
             String priorityText = String.valueOf(config.priority);
-            if (!priorityField.getText().equals(priorityText)) {
-                priorityField.setText(priorityText);
+            if (!priorityField.getValue().equals(priorityText)) {
+                priorityField.setValue(priorityText);
             }
         }
 
@@ -262,9 +272,9 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
         // Only set name field if it exists
         if (nameField != null) {
             if (config.customName != null && !config.customName.isEmpty()) {
-                nameField.setText(config.customName);
+                nameField.setValue(config.customName);
             } else {
-                nameField.setText("");
+                nameField.setValue("");
             }
         }
     }
@@ -302,7 +312,7 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
                 if (priorityDropdown != null) {
                     priorityDropdown.setSelectedIndex(ChestConfig.SimplePriority.LOWEST.ordinal());
                 } else if (priorityField != null) {
-                    priorityField.setText(String.valueOf(maxPriority));
+                    priorityField.setValue(String.valueOf(maxPriority));
                 }
             }
 
@@ -323,7 +333,7 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
         this.externalDropdownOpen = open;
     }
 
-    public void renderDropdownsOnly(DrawContext context, int mouseX, int mouseY) {
+    public void renderDropdownsOnly(GuiGraphicsExtractor context, int mouseX, int mouseY) {
         if (currentConfig == null) return;
 
         // Only render if actually open
@@ -357,7 +367,7 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
     }
 
     @Override
-    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
         context.fill(x, y, x + width, y + height, 0xFF2B2B2B);
         context.fill(x + 1, y + 1, x + width - 1, y + height - 1, 0xFF3C3C3C);
 
@@ -392,7 +402,7 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
                 nameField.setX(innerX);
                 nameField.setY(currentY);
                 nameField.setWidth(width - PADDING * 2 - 40);
-                nameField.render(context, mouseX, mouseY, delta);
+                nameField.extractRenderState(context, mouseX, mouseY, delta);
             } else if (currentConfig.customName != null && !currentConfig.customName.isEmpty()) {
                 String nameDisplay = currentConfig.customName.length() > 25
                         ? currentConfig.customName.substring(0, 22) + "..."
@@ -405,7 +415,7 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
             if (renameButton != null) {
                 renameButton.setX(innerX + width - PADDING * 2 - 40);
                 renameButton.setY(currentY - 1);
-                renameButton.render(context, mouseX, mouseY, delta);
+                renameButton.extractRenderState(context, mouseX, mouseY, delta);
             }
 
             currentY += 12;
@@ -433,7 +443,7 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
             drawScaledText(context, "§7Filter:", innerX, currentY + 1, 0xFFAAAAAA, 0.65f);
             categoryDropdown.setX(innerX + 35);
             categoryDropdown.setY(currentY);
-            categoryDropdown.render(context, mouseX, mouseY, delta);
+            categoryDropdown.extractRenderState(context, mouseX, mouseY, delta);
             currentY += 13;
         }
 
@@ -444,14 +454,14 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
             // Probe screen - show dropdown
             priorityDropdown.setX(innerX + 35);
             priorityDropdown.setY(currentY);
-            priorityDropdown.render(context, mouseX, mouseY, delta);
+            priorityDropdown.extractRenderState(context, mouseX, mouseY, delta);
         } else if (priorityField != null) {
             // Controller screen - ALWAYS show text field, just don't make it interactive when dropdowns are open
             priorityField.setX(innerX + 35);
             priorityField.setY(currentY);
             priorityField.setVisible(true); // ALWAYS visible
             priorityField.setEditable(!anyDropdownOpen); // But not editable when dropdowns are open
-            priorityField.render(context, mouseX, mouseY, delta);
+            priorityField.extractRenderState(context, mouseX, mouseY, delta);
             drawScaledText(context, "§8(1-" + maxPriority + ")", innerX + 68, currentY + 1, 0xFF888888, 0.55f);
         }
 
@@ -461,7 +471,7 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
         drawScaledText(context, "§7Mode:", innerX, currentY + 1, 0xFFAAAAAA, 0.65f);
         filterModeDropdown.setX(innerX + 35);
         filterModeDropdown.setY(currentY);
-        filterModeDropdown.render(context, mouseX, mouseY, delta);
+        filterModeDropdown.extractRenderState(context, mouseX, mouseY, delta);
         currentY += 13;
 
         if (currentConfig.filterMode != null) {
@@ -474,7 +484,7 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
         if (currentConfig.filterMode == ChestConfig.FilterMode.CUSTOM) {
             strictNBTCheckbox.setX(innerX);
             strictNBTCheckbox.setY(currentY);
-            strictNBTCheckbox.render(context, mouseX, mouseY, delta);
+            strictNBTCheckbox.extractRenderState(context, mouseX, mouseY, delta);
 
             int descX = innerX + 63;
             if (currentConfig.strictNBTMatch) {
@@ -493,7 +503,6 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
         }
 
         // Render dropdowns on top - ALL versions need this
-        //? if >=1.21.8 {
         if (categoryDropdown != null && categoryDropdown.isOpen()) {
             categoryDropdown.renderDropdown(context, mouseX, mouseY);
         }
@@ -503,41 +512,19 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
         if (priorityDropdown != null && priorityDropdown.isOpen()) {
             priorityDropdown.renderDropdown(context, mouseX, mouseY);
         }
-        //?} else {
-        /*// For 1.21.1, render here too (OutputProbeScreen will render again with z-layer)
-        if (categoryDropdown != null && categoryDropdown.isOpen() && currentConfig.filterMode.needsCategoryFilter()) {
-            categoryDropdown.renderDropdown(context, mouseX, mouseY);
-        }
-        if (filterModeDropdown != null && filterModeDropdown.isOpen()) {
-            filterModeDropdown.renderDropdown(context, mouseX, mouseY);
-        }
-        if (priorityDropdown != null && priorityDropdown.isOpen()) {
-            priorityDropdown.renderDropdown(context, mouseX, mouseY);
-        }
-        *///?}
     }
 
-    private void drawScaledText(DrawContext context, String text, int x, int y, int color, float scale) {
-        //? if >=1.21.8 {
-        Matrix3x2f oldMatrix = new Matrix3x2f(context.getMatrices());
+    private void drawScaledText(GuiGraphicsExtractor context, String text, int x, int y, int color, float scale) {
+        Matrix3x2f oldMatrix = new Matrix3x2f(context.pose());
         Matrix3x2f scaleMatrix = new Matrix3x2f().scaling(scale, scale);
-        context.getMatrices().mul(scaleMatrix);
+        context.pose().mul(scaleMatrix);
         Matrix3x2f translateMatrix = new Matrix3x2f().translation(x / scale, y / scale);
-        context.getMatrices().mul(translateMatrix);
-        context.drawText(textRenderer, text, 0, 0, color, false);
-        context.getMatrices().set(oldMatrix);
-        //?} else {
-        /*net.minecraft.client.util.math.MatrixStack matrices = context.getMatrices();
-        matrices.push();
-        matrices.scale(scale, scale, scale);
-        matrices.translate(x / scale, y / scale, 0);
-        context.drawText(textRenderer, text, 0, 0, color, false);
-        matrices.pop();
-        *///?}
+        context.pose().mul(translateMatrix);
+        context.text(textRenderer, text, 0, 0, color, false);
+        context.pose().set(oldMatrix);
     }
 
-    //? if >=1.21.9 {
-    public boolean keyPressed(KeyInput input) {
+    public boolean keyPressed(KeyEvent input) {
         if (nameField != null && nameField.isFocused()) {
             if (input.key() == 257) { // Enter key
                 toggleRename();
@@ -551,7 +538,7 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
         return false;
     }
 
-    public boolean charTyped(CharInput input) {
+    public boolean charTyped(CharacterEvent input) {
         if (nameField != null && nameField.isFocused()) {
             return nameField.charTyped(input);
         }
@@ -560,31 +547,6 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
         }
         return false;
     }
-    //?} else {
-    /*public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (nameField != null && nameField.isFocused()) {
-            if (keyCode == 257) { // Enter key
-                toggleRename();
-                return true;
-            }
-            return nameField.keyPressed(keyCode, scanCode, modifiers);
-        }
-        if (priorityField != null && priorityField.isFocused()) {
-            return priorityField.keyPressed(keyCode, scanCode, modifiers);
-        }
-        return false;
-    }
-
-    public boolean charTyped(char chr, int modifiers) {
-        if (nameField != null && nameField.isFocused()) {
-            return nameField.charTyped(chr, modifiers);
-        }
-        if (priorityField != null && priorityField.isFocused()) {
-            return priorityField.charTyped(chr, modifiers);
-        }
-        return false;
-    }
-    *///?}
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
@@ -610,29 +572,16 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
 
         // Only handle rename button if enabled
         if (showRenameButton && renameButton != null) {
-            //? if >=1.21.9 {
-            if (renameButton.mouseClicked(new Click(mouseX, mouseY, new MouseInput(button, 0)), false)) {
+            if (renameButton.mouseClicked(new MouseButtonEvent(mouseX, mouseY, new MouseButtonInfo(button, 0)), false)) {
                 return true;
             }
-            //?} else {
-            /*if (renameButton.mouseClicked(mouseX, mouseY, button)) {
-                return true;
-            }
-            *///?}
 
             // Handle name field
             if (isRenaming) {
-                //? if >=1.21.9 {
-                if (nameField.mouseClicked(new Click(mouseX, mouseY, new MouseInput(button, 0)), false)) {
+                if (nameField.mouseClicked(new MouseButtonEvent(mouseX, mouseY, new MouseButtonInfo(button, 0)), false)) {
                     nameField.setFocused(true);
                     return true;
                 }
-                //?} else {
-                /*if (nameField.mouseClicked(mouseX, mouseY, button)) {
-                    nameField.setFocused(true);
-                    return true;
-                }
-                *///?}
             }
         }
 
@@ -648,53 +597,31 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
             }
         }
 
-        //? if >=1.21.9 {
-        if (priorityField != null && priorityField.mouseClicked(new Click(mouseX, mouseY, new MouseInput(button, 0)), false)) {
+        if (priorityField != null && priorityField.mouseClicked(new MouseButtonEvent(mouseX, mouseY, new MouseButtonInfo(button, 0)), false)) {
             priorityField.setFocused(true);
             return true;
         }
-        //?} else {
-        /*// Check if click is within priority field bounds
-        if (priorityField != null) {
-            int px = priorityField.getX();
-            int py = priorityField.getY();
-            int pw = priorityField.getWidth();
-            int ph = priorityField.getHeight();
-
-            if (mouseX >= px && mouseX < px + pw && mouseY >= py && mouseY < py + ph) {
-                priorityField.setFocused(true);
-                priorityField.mouseClicked(mouseX, mouseY, button);
-                return true;
-            }
-        }
-        *///?}
 
         if (filterModeDropdown.mouseClicked(mouseX, mouseY, button)) {
             return true;
         }
 
         if (currentConfig.filterMode == ChestConfig.FilterMode.CUSTOM) {
-            //? if >=1.21.9 {
-            if (strictNBTCheckbox.mouseClicked(new Click(mouseX, mouseY, new MouseInput(button, 0)), false)) {
+            if (strictNBTCheckbox.mouseClicked(new MouseButtonEvent(mouseX, mouseY, new MouseButtonInfo(button, 0)), false)) {
                 return true;
             }
-            //?} else {
-            /*if (strictNBTCheckbox.mouseClicked(mouseX, mouseY, button)) {
-                return true;
-            }
-            *///?}
         }
 
         return false;
     }
 
     @Override
-    public SelectionType getType() {
-        return SelectionType.NONE;
+    public NarrationPriority narrationPriority() {
+        return NarrationPriority.NONE;
     }
 
     @Override
-    public void appendNarrations(NarrationMessageBuilder builder) {
+    public void updateNarration(NarrationElementOutput builder) {
         // Can be left empty
     }
 }

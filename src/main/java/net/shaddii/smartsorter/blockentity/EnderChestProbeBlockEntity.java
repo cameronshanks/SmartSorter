@@ -1,23 +1,15 @@
 package net.shaddii.smartsorter.blockentity;
 
-import net.minecraft.block.BlockState;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.inventory.EnderChestInventory;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.Container;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
 import net.shaddii.smartsorter.SmartSorter;
 import org.jetbrains.annotations.Nullable;
-
-//? if >=1.21.8 {
-import net.minecraft.storage.ReadView;
-import net.minecraft.storage.WriteView;
-//?} else {
-/*import net.minecraft.nbt.NbtCompound;
-import net.minecraft.registry.RegistryWrapper;
-*///?}
-
 import java.util.UUID;
 
 /**
@@ -34,11 +26,11 @@ public class EnderChestProbeBlockEntity extends OutputProbeBlockEntity {
 
     public void setOwner(UUID playerUUID) {
         this.ownerUUID = playerUUID;
-        markDirty();
+        setChanged();
     }
 
-    public void setOwner(PlayerEntity player) {
-        setOwner(player.getUuid());
+    public void setOwner(Player player) {
+        setOwner(player.getUUID());
     }
 
     @Nullable
@@ -50,13 +42,13 @@ public class EnderChestProbeBlockEntity extends OutputProbeBlockEntity {
      * Override to return ender chest inventory if owner is online
      */
     @Override
-    public Inventory getTargetInventory() {
-        if (world == null || world.isClient()) return null;
-        if (!(world instanceof ServerWorld serverWorld)) return null;
+    public Container getTargetInventory() {
+        if (level == null || level.isClientSide()) return null;
+        if (!(level instanceof ServerLevel serverWorld)) return null;
         if (ownerUUID == null) return null;
 
         // Try to get online player
-        ServerPlayerEntity player = serverWorld.getServer().getPlayerManager().getPlayer(ownerUUID);
+        ServerPlayer player = serverWorld.getServer().getPlayerList().getPlayer(ownerUUID);
 
         if (player != null) {
             // Player is online - return their ender chest inventory
@@ -71,10 +63,9 @@ public class EnderChestProbeBlockEntity extends OutputProbeBlockEntity {
     // NBT SERIALIZATION
     // ========================================
 
-    //? if >=1.21.8 {
     @Override
-    public void writeData(WriteView view) {
-        super.writeData(view);
+    public void saveAdditional(ValueOutput view) {
+        super.saveAdditional(view);
 
         if (ownerUUID != null) {
             view.putBoolean("hasOwner", true);
@@ -86,34 +77,15 @@ public class EnderChestProbeBlockEntity extends OutputProbeBlockEntity {
     }
 
     @Override
-    public void readData(ReadView view) {
-        super.readData(view);
+    public void loadAdditional(ValueInput view) {
+        super.loadAdditional(view);
 
-        if (view.getBoolean("hasOwner", false)) {
-            long most = view.getLong("ownerMost", 0);
-            long least = view.getLong("ownerLeast", 0);
+        if (view.getBooleanOr("hasOwner", false)) {
+            long most = view.getLongOr("ownerMost", 0);
+            long least = view.getLongOr("ownerLeast", 0);
             if (most != 0 || least != 0) {
                 this.ownerUUID = new UUID(most, least);
             }
         }
     }
-    //?} else {
-    /*@Override
-    protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
-        super.writeNbt(nbt, registryLookup);
-
-        if (ownerUUID != null) {
-            nbt.putUuid("ownerUUID", ownerUUID);
-        }
-    }
-
-    @Override
-    protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
-        super.readNbt(nbt, registryLookup);
-
-        if (nbt.containsUuid("ownerUUID")) {
-            this.ownerUUID = nbt.getUuid("ownerUUID");
-        }
-    }
-    *///?}
 }

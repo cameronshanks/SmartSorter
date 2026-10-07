@@ -1,11 +1,11 @@
 package net.shaddii.smartsorter.network;
 
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 
 /**
  * Client -> server only. Flips a chest's whitelist ENABLED flag (whether the
@@ -17,30 +17,30 @@ import net.minecraft.util.math.BlockPos;
  * WhitelistUpdatePayload that could overwrite the list with a stale or
  * empty copy.
  */
-public record WhitelistToggleEnabledPayload(BlockPos position) implements CustomPayload {
+public record WhitelistToggleEnabledPayload(BlockPos position) implements CustomPacketPayload {
 
-    public static final CustomPayload.Id<WhitelistToggleEnabledPayload> ID =
-            new CustomPayload.Id<>(Identifier.of("smartsorter", "whitelist_toggle_enabled"));
+    public static final CustomPacketPayload.Type<WhitelistToggleEnabledPayload> ID =
+            new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath("smartsorter", "whitelist_toggle_enabled"));
 
-    public static final PacketCodec<RegistryByteBuf, WhitelistToggleEnabledPayload> CODEC = new PacketCodec<>() {
+    public static final StreamCodec<RegistryFriendlyByteBuf, WhitelistToggleEnabledPayload> CODEC = new StreamCodec<>() {
         @Override
-        public WhitelistToggleEnabledPayload decode(RegistryByteBuf buf) {
+        public WhitelistToggleEnabledPayload decode(RegistryFriendlyByteBuf buf) {
             return new WhitelistToggleEnabledPayload(buf.readBlockPos());
         }
 
         @Override
-        public void encode(RegistryByteBuf buf, WhitelistToggleEnabledPayload payload) {
+        public void encode(RegistryFriendlyByteBuf buf, WhitelistToggleEnabledPayload payload) {
             buf.writeBlockPos(payload.position);
         }
     };
 
     @Override
-    public CustomPayload.Id<? extends CustomPayload> getId() {
+    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
         return ID;
     }
 
     /** C2S only - the server never sends this one. */
     public static void registerCodec() {
-        PayloadTypeRegistry.playC2S().register(ID, CODEC);
+        PayloadTypeRegistry.serverboundPlay().register(ID, CODEC);
     }
 }

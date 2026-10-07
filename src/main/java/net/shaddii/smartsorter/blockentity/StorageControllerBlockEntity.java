@@ -1,37 +1,29 @@
 package net.shaddii.smartsorter.blockentity;
 
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtElement;
-import net.minecraft.nbt.NbtList;
-import net.minecraft.nbt.NbtLong;
-import net.minecraft.screen.NamedScreenHandlerFactory;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
+import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.Container;
+import net.minecraft.world.MenuProvider;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.blockentity.controller.*;
 import net.shaddii.smartsorter.chunk.ChunkKeeper;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
 import net.shaddii.smartsorter.util.*;
 import org.jetbrains.annotations.Nullable;
-
-//? if >=1.21.8 {
-import net.minecraft.storage.ReadView;
-import net.minecraft.storage.WriteView;
-//?} else {
-/*import net.minecraft.registry.RegistryWrapper;
- *///?}
-
 import java.util.*;
 
 /**
@@ -39,7 +31,7 @@ import java.util.*;
  * OPTIMIZED: 300 lines vs 1000+, better separation of concerns.
  */
 public class StorageControllerBlockEntity extends BlockEntity
-        implements NamedScreenHandlerFactory, Inventory {
+        implements MenuProvider, Container {
 
     // ========================================
     // CONSTANTS
@@ -70,6 +62,7 @@ public class StorageControllerBlockEntity extends BlockEntity
     private final List<BlockPos> linkedIntakes = new ArrayList<>();
 
     private long lastCacheUpdate = 0;
+    private long lastChangeStamp = Long.MIN_VALUE;
     private long lastSyncTime = 0;
     private boolean networkDirty = true;
 
@@ -98,16 +91,16 @@ public class StorageControllerBlockEntity extends BlockEntity
     // TICK LOGIC
     // ========================================
 
-    public static void tick(World world, BlockPos pos, BlockState state,
+    public static void tick(Level world, BlockPos pos, BlockState state,
                             StorageControllerBlockEntity be) {
-        if (world.isClient()) return;
+        if (world.isClientSide()) return;
 
         if (be.firstTick) {
             be.firstTick = false;
             be.detectAllChests();
         }
 
-        long currentTime = world.getTime();
+        long currentTime = world.getGameTime();
 
         // Periodic validation
         if (currentTime % VALIDATION_INTERVAL == 0) {
@@ -120,10 +113,15 @@ public class StorageControllerBlockEntity extends BlockEntity
                 ? 20
                 : CACHE_DURATION;
 
-        // OPTIMIZATION: Only update if significantly dirty
-        boolean shouldUpdate = be.networkDirty &&
-                (currentTime - be.lastCacheUpdate >= cacheDuration) &&
-                (be.dirtyCounter >= DIRTY_THRESHOLD || probeCount > LARGE_NETWORK_THRESHOLD);
+        // Refresh at most once per cacheDuration, and only when something
+        // changed: a network operation (networkDirty) or a linked chest edited
+        // from outside the network (hand, hopper), seen via its change counter.
+        boolean shouldUpdate = false;
+        if (currentTime - be.lastCacheUpdate >= cacheDuration) {
+            long stamp = be.linkedChestChangeStamp();
+            shouldUpdate = be.networkDirty || stamp != be.lastChangeStamp;
+            be.lastChangeStamp = stamp;
+        }
 
         if (shouldUpdate) {
             be.updateNetworkCache();
@@ -135,20 +133,20 @@ public class StorageControllerBlockEntity extends BlockEntity
     }
 
     private void detectAllChests() {
-        if (world == null) return;
+        if (level == null) return;
 
         // OPTIMIZATION: Use batch version to avoid 1680 full priority recalculations
-        chestConfigManager.onAllChestsDetected(world, probeRegistry.getLinkedProbes());
+        chestConfigManager.onAllChestsDetected(level, probeRegistry.getLinkedProbes());
     }
 
     private void validateLinks() {
-        probeRegistry.validate(world);
+        probeRegistry.validate(level);
 
         // Intakes in unloaded chunks stay linked: looking them up would
         // force a synchronous chunk load.
         linkedIntakes.removeIf(intakePos -> {
-            if (!world.isChunkLoaded(intakePos)) return false;
-            BlockEntity be = world.getBlockEntity(intakePos);
+            if (!level.hasChunkAt(intakePos)) return false;
+            BlockEntity be = level.getBlockEntity(intakePos);
             return !(be instanceof IntakeBlockEntity);
         });
     }
@@ -158,21 +156,21 @@ public class StorageControllerBlockEntity extends BlockEntity
     // ========================================
 
     public void updateNetworkCache() {
-        if (world == null) return;
+        if (level == null) return;
 
         // If user operation pending and large network, force full update
         if (userOperationPending && probeRegistry.getProbeCount() > LARGE_NETWORK_THRESHOLD) {
-            networkManager.updateCacheForceFull(world, probeRegistry.getLinkedProbes());
+            networkManager.updateCacheForceFull(level, probeRegistry.getLinkedProbes());
             userOperationPending = false;
         } else {
-            networkManager.updateCache(world, probeRegistry.getLinkedProbes());
+            networkManager.updateCache(level, probeRegistry.getLinkedProbes());
         }
     }
 
     private void syncToViewers() {
-        if (!(world instanceof ServerWorld serverWorld)) return;
+        if (!(level instanceof ServerLevel serverWorld)) return;
 
-        long currentTime = world.getTime();
+        long currentTime = level.getGameTime();
         if (currentTime - lastSyncTime < SYNC_COOLDOWN) return;
         lastSyncTime = currentTime;
 
@@ -180,12 +178,31 @@ public class StorageControllerBlockEntity extends BlockEntity
 
         Map<ItemVariant, Long> deltas = networkManager.consumeDeltas();
 
-        for (ServerPlayerEntity player : serverWorld.getPlayers()) {
-            if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler
+        for (ServerPlayer player : serverWorld.players()) {
+            if (player.containerMenu instanceof StorageControllerScreenHandler handler
                     && handler.controller == this) {
                 handler.sendNetworkUpdate(player, deltas);
             }
         }
+    }
+
+    /**
+     * Sum of the linked chests' change counters: one field read per chest.
+     * The counters only grow, so any content change moves the sum.
+     */
+    private long linkedChestChangeStamp() {
+        long stamp = 0;
+        for (BlockPos probePos : probeRegistry.getLinkedProbes()) {
+            if (!level.hasChunkAt(probePos)) continue;
+            if (level.getBlockEntity(probePos) instanceof OutputProbeBlockEntity probe) {
+                BlockPos target = probe.getTargetPos();
+                if (target != null && level.hasChunkAt(target)
+                        && level.getBlockEntity(target) instanceof ChangeCounter counter) {
+                    stamp += counter.smartsorter$getChangeCount();
+                }
+            }
+        }
+        return stamp;
     }
 
     public Map<ItemVariant, Long> getNetworkItems() {
@@ -202,11 +219,11 @@ public class StorageControllerBlockEntity extends BlockEntity
     }
 
     public void forceUpdateCache() {
-        if (world == null || world.isClient()) return;
+        if (level == null || level.isClientSide()) return;
 
-        networkManager.updateCacheForceFull(world, probeRegistry.getLinkedProbes());
+        networkManager.updateCacheForceFull(level, probeRegistry.getLinkedProbes());
 
-        lastCacheUpdate = world.getTime();
+        lastCacheUpdate = level.getGameTime();
 
         int probeCount = probeRegistry.getProbeCount();
         if (probeCount <= LARGE_NETWORK_THRESHOLD) {
@@ -226,15 +243,15 @@ public class StorageControllerBlockEntity extends BlockEntity
 
         if (added) {
             networkDirty = true;
-            markDirty();
+            setChanged();
 
-            if (world != null) {
+            if (level != null) {
                 // Detect and add chest config
-                BlockEntity be = world.getBlockEntity(probePos);
+                BlockEntity be = level.getBlockEntity(probePos);
                 if (be instanceof OutputProbeBlockEntity probe) {
                     BlockPos targetPos = probe.getTargetPos();
                     if (targetPos != null) {
-                        chestConfigManager.onChestDetected(world, targetPos, probe);
+                        chestConfigManager.onChestDetected(level, targetPos, probe);
                     }
                 }
 
@@ -250,14 +267,14 @@ public class StorageControllerBlockEntity extends BlockEntity
 
         if (removed) {
             networkDirty = true;
-            markDirty();
+            setChanged();
 
-            if (world != null) {
-                BlockEntity be = world.getBlockEntity(probePos);
+            if (level != null) {
+                BlockEntity be = level.getBlockEntity(probePos);
                 if (be instanceof OutputProbeBlockEntity probe) {
                     BlockPos targetPos = probe.getTargetPos();
                     if (targetPos != null) {
-                        chestConfigManager.onChestRemoved(world, targetPos, probeRegistry.getLinkedProbes());
+                        chestConfigManager.onChestRemoved(level, targetPos, probeRegistry.getLinkedProbes());
                     }
                 }
 
@@ -284,7 +301,7 @@ public class StorageControllerBlockEntity extends BlockEntity
         if (linkedIntakes.contains(intakePos)) return false;
 
         linkedIntakes.add(intakePos);
-        markDirty();
+        setChanged();
         updateListeners();
         return true;
     }
@@ -292,7 +309,7 @@ public class StorageControllerBlockEntity extends BlockEntity
     public boolean removeIntake(BlockPos intakePos) {
         boolean removed = linkedIntakes.remove(intakePos);
         if (removed) {
-            markDirty();
+            setChanged();
             updateListeners();
         }
         return removed;
@@ -308,7 +325,7 @@ public class StorageControllerBlockEntity extends BlockEntity
 
     public ItemRoutingService.InsertionResult insertItem(ItemStack stack) {
         ItemVariant variant = ItemVariant.of(stack);
-        ItemRoutingService.InsertionResult result = routingService.insertItem(world, stack);
+        ItemRoutingService.InsertionResult result = routingService.insertItem(level, stack);
 
         // OPTIMIZATION: Incrementally update cache instead of full rescan
         if (result.amountInserted() > 0) {
@@ -320,7 +337,7 @@ public class StorageControllerBlockEntity extends BlockEntity
     }
 
     public ItemStack extractItem(ItemVariant variant, int amount) {
-        ItemStack result = routingService.extractItem(world, variant, amount, networkManager);
+        ItemStack result = routingService.extractItem(level, variant, amount, networkManager);
 
         // OPTIMIZATION: Incrementally update cache instead of full rescan
         if (!result.isEmpty()) {
@@ -336,7 +353,7 @@ public class StorageControllerBlockEntity extends BlockEntity
         List<BlockPos> probesWithItem = networkManager.getProbesWithItem(variant);
 
         for (BlockPos probePos : probesWithItem) {
-            BlockEntity be = world.getBlockEntity(probePos);
+            BlockEntity be = level.getBlockEntity(probePos);
             if (be instanceof OutputProbeBlockEntity probe) {
                 if (probe.hasSpace(variant, amount)) {
                     return true;
@@ -346,16 +363,16 @@ public class StorageControllerBlockEntity extends BlockEntity
 
         // Check all probes for empty space
         for (BlockPos probePos : probeRegistry.getLinkedProbes()) {
-            BlockEntity be = world.getBlockEntity(probePos);
+            BlockEntity be = level.getBlockEntity(probePos);
             if (!(be instanceof OutputProbeBlockEntity probe)) continue;
 
             if (!probe.accepts(variant)) continue;
 
-            Inventory inv = probe.getTargetInventory();
+            Container inv = probe.getTargetInventory();
             if (inv == null) continue;
 
-            for (int i = 0; i < inv.size(); i++) {
-                if (inv.getStack(i).isEmpty()) {
+            for (int i = 0; i < inv.getContainerSize(); i++) {
+                if (inv.getItem(i).isEmpty()) {
                     return true;
                 }
             }
@@ -369,7 +386,7 @@ public class StorageControllerBlockEntity extends BlockEntity
     // ========================================
 
     public Map<BlockPos, ChestConfig> getChestConfigs() {
-        return chestConfigManager.getChestConfigs(world, probeRegistry.getLinkedProbes());
+        return chestConfigManager.getChestConfigs(level, probeRegistry.getLinkedProbes());
     }
 
     public ChestConfig getChestConfig(BlockPos position) {
@@ -377,12 +394,12 @@ public class StorageControllerBlockEntity extends BlockEntity
     }
 
     public void updateChestConfig(BlockPos position, ChestConfig config) {
-        chestConfigManager.updateChestConfig(world, position, config, this);
+        chestConfigManager.updateChestConfig(level, position, config, this);
         probeRegistry.invalidateCache();
 
         // INVALIDATE ALL PROBE CACHES FOR THIS CHEST
         for (BlockPos probePos : probeRegistry.getLinkedProbes()) {
-            BlockEntity be = world.getBlockEntity(probePos);
+            BlockEntity be = level.getBlockEntity(probePos);
             if (be instanceof OutputProbeBlockEntity probe) {
                 if (position.equals(probe.getTargetPos())) {
                     probe.invalidateConfigCache();
@@ -392,30 +409,30 @@ public class StorageControllerBlockEntity extends BlockEntity
 
         RoutingIndexEpoch.bump(); // filter / bulk edit
         networkDirty = true;
-        markDirty();
+        setChanged();
         updateListeners();
     }
 
     public void removeChestConfig(BlockPos chestPos) {
-        chestConfigManager.removeChestConfig(world, chestPos, this);
+        chestConfigManager.removeChestConfig(level, chestPos, this);
         probeRegistry.invalidateCache();
         RoutingIndexEpoch.bump();
         networkDirty = true;
-        markDirty();
+        setChanged();
     }
 
     public boolean isChestLinked(BlockPos chestPos) {
-        return chestConfigManager.isChestLinked(world, chestPos, probeRegistry.getLinkedProbes());
+        return chestConfigManager.isChestLinked(level, chestPos, probeRegistry.getLinkedProbes());
     }
 
     // ========================================
     // SORTING (Delegates to ChestSortingService)
     // ========================================
 
-    public void sortChestsInOrder(List<BlockPos> positions, @Nullable ServerPlayerEntity player) {
+    public void sortChestsInOrder(List<BlockPos> positions, @Nullable ServerPlayer player) {
         updateNetworkCache();
-        sortingService.sortChests(world, positions, player);
-        markDirty();
+        sortingService.sortChests(level, positions, player);
+        setChanged();
         updateNetworkCache();
     }
 
@@ -424,23 +441,23 @@ public class StorageControllerBlockEntity extends BlockEntity
     // ========================================
 
     public boolean registerProcessProbe(BlockPos pos, String machineType) {
-        boolean result = processProbeManager.registerProbe(world, pos, machineType);
+        boolean result = processProbeManager.registerProbe(level, pos, machineType);
         if (result) {
-            markDirty();
+            setChanged();
             networkDirty = true;
         }
         return result;
     }
 
     public void unregisterProcessProbe(BlockPos pos) {
-        processProbeManager.unregisterProbe(world, pos);
-        markDirty();
+        processProbeManager.unregisterProbe(level, pos);
+        setChanged();
         networkDirty = true;
     }
 
     public void updateProbeConfig(ProcessProbeConfig config) {
-        processProbeManager.updateConfig(world, config, this);
-        markDirty();
+        processProbeManager.updateConfig(level, config, this);
+        setChanged();
         networkDirty = true;
     }
 
@@ -453,7 +470,7 @@ public class StorageControllerBlockEntity extends BlockEntity
     }
 
     public void syncProbeStatsToClients(BlockPos probePos, int itemsProcessed) {
-        processProbeManager.syncStatsToClients(world, probePos, itemsProcessed, this);
+        processProbeManager.syncStatsToClients(level, probePos, itemsProcessed, this);
     }
 
     // ========================================
@@ -464,7 +481,7 @@ public class StorageControllerBlockEntity extends BlockEntity
 
     public void addExperience(int amount) {
         storedExperience += amount;
-        markDirty();
+        setChanged();
     }
 
     public int getStoredExperience() {
@@ -474,7 +491,7 @@ public class StorageControllerBlockEntity extends BlockEntity
     public int collectExperience() {
         int xp = storedExperience;
         storedExperience = 0;
-        markDirty();
+        setChanged();
         return xp;
     }
 
@@ -483,18 +500,18 @@ public class StorageControllerBlockEntity extends BlockEntity
     // ========================================
 
     public int calculateTotalFreeSlots() {
-        if (world == null) return 0;
+        if (level == null) return 0;
 
         int totalFree = 0;
         for (BlockPos probePos : probeRegistry.getLinkedProbes()) {
-            BlockEntity be = world.getBlockEntity(probePos);
+            BlockEntity be = level.getBlockEntity(probePos);
             if (!(be instanceof OutputProbeBlockEntity probe)) continue;
 
-            Inventory inv = probe.getTargetInventory();
+            Container inv = probe.getTargetInventory();
             if (inv == null) continue;
 
-            for (int i = 0; i < inv.size(); i++) {
-                if (inv.getStack(i).isEmpty()) {
+            for (int i = 0; i < inv.getContainerSize(); i++) {
+                if (inv.getItem(i).isEmpty()) {
                     totalFree++;
                 }
             }
@@ -504,16 +521,16 @@ public class StorageControllerBlockEntity extends BlockEntity
     }
 
     public int calculateTotalCapacity() {
-        if (world == null) return 0;
+        if (level == null) return 0;
 
         int totalSlots = 0;
         for (BlockPos probePos : probeRegistry.getLinkedProbes()) {
-            BlockEntity be = world.getBlockEntity(probePos);
+            BlockEntity be = level.getBlockEntity(probePos);
             if (!(be instanceof OutputProbeBlockEntity probe)) continue;
 
-            Inventory inv = probe.getTargetInventory();
+            Container inv = probe.getTargetInventory();
             if (inv != null) {
-                totalSlots += inv.size();
+                totalSlots += inv.getContainerSize();
             }
         }
 
@@ -528,7 +545,7 @@ public class StorageControllerBlockEntity extends BlockEntity
      * Calculates fullness of a specific chest (public API).
      */
     public int calculateChestFullness(BlockPos chestPos) {
-        return chestConfigManager.calculateChestFullness(world, chestPos, probeRegistry.getLinkedProbes());
+        return chestConfigManager.calculateChestFullness(level, chestPos, probeRegistry.getLinkedProbes());
     }
 
     /**
@@ -537,17 +554,16 @@ public class StorageControllerBlockEntity extends BlockEntity
     public void sortChestIntoNetwork(BlockPos chestPos,
                                      Map<ItemVariant, Long> overflowCounts,
                                      Map<ItemVariant, String> overflowDestinations) {
-        sortingService.sortChest(world, chestPos, overflowCounts, overflowDestinations);
+        sortingService.sortChest(level, chestPos, overflowCounts, overflowDestinations);
     }
 
     // ========================================
     // NBT SERIALIZATION (Using original pattern)
     // ========================================
 
-    //? if >=1.21.8 {
     @Override
-    public void writeData(WriteView view) {
-        super.writeData(view);
+    public void saveAdditional(ValueOutput view) {
+        super.saveAdditional(view);
 
         // Probes
         List<BlockPos> probes = probeRegistry.getLinkedProbes();
@@ -607,11 +623,11 @@ public class StorageControllerBlockEntity extends BlockEntity
      * Bulk Edit add-on this fork grew out of, so worlds that used the add-on
      * keep their whitelists.
      */
-    private static void writeWhitelists(WriteView view, Map<BlockPos, ChestConfig> configs) {
+    private static void writeWhitelists(ValueOutput view, Map<BlockPos, ChestConfig> configs) {
         int index = 0;
         for (Map.Entry<BlockPos, ChestConfig> entry : configs.entrySet()) {
             ChestConfig config = entry.getValue();
-            Set<net.minecraft.item.Item> items = config.getWhitelist();
+            Set<net.minecraft.world.item.Item> items = config.getWhitelist();
             if (!config.whitelistEnabled && !config.whitelistEditMode && items.isEmpty()) {
                 continue;
             }
@@ -621,8 +637,8 @@ public class StorageControllerBlockEntity extends BlockEntity
             view.putBoolean(prefix + "_editMode", config.whitelistEditMode);
             view.putInt(prefix + "_count", items.size());
             int itemIndex = 0;
-            for (net.minecraft.item.Item item : items) {
-                view.putString(prefix + "_item_" + itemIndex, net.minecraft.registry.Registries.ITEM.getId(item).toString());
+            for (net.minecraft.world.item.Item item : items) {
+                view.putString(prefix + "_item_" + itemIndex, net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item).toString());
                 itemIndex++;
             }
             index++;
@@ -630,98 +646,98 @@ public class StorageControllerBlockEntity extends BlockEntity
         view.putInt("ssbulk_wl_chest_count", index);
     }
 
-    private void readWhitelists(ReadView view) {
-        int chestCount = view.getInt("ssbulk_wl_chest_count", 0);
+    private void readWhitelists(ValueInput view) {
+        int chestCount = view.getIntOr("ssbulk_wl_chest_count", 0);
         for (int index = 0; index < chestCount; index++) {
             String prefix = "ssbulk_wl_" + index;
-            Optional<Long> posLong = view.getOptionalLong(prefix + "_pos");
+            Optional<Long> posLong = view.getLong(prefix + "_pos");
             if (posLong.isEmpty()) {
                 continue;
             }
-            ChestConfig config = chestConfigManager.getChestConfig(BlockPos.fromLong(posLong.get()));
+            ChestConfig config = chestConfigManager.getChestConfig(BlockPos.of(posLong.get()));
             if (config == null) {
                 continue; // chest no longer linked
             }
-            Set<net.minecraft.item.Item> items = new HashSet<>();
-            int itemCount = view.getInt(prefix + "_count", 0);
+            Set<net.minecraft.world.item.Item> items = new HashSet<>();
+            int itemCount = view.getIntOr(prefix + "_count", 0);
             for (int itemIndex = 0; itemIndex < itemCount; itemIndex++) {
-                view.getOptionalString(prefix + "_item_" + itemIndex).ifPresent(idStr -> {
-                    net.minecraft.util.Identifier id = net.minecraft.util.Identifier.tryParse(idStr);
+                view.getString(prefix + "_item_" + itemIndex).ifPresent(idStr -> {
+                    net.minecraft.resources.Identifier id = net.minecraft.resources.Identifier.tryParse(idStr);
                     if (id != null) {
-                        items.add(net.minecraft.registry.Registries.ITEM.get(id));
+                        items.add(net.minecraft.core.registries.BuiltInRegistries.ITEM.getValue(id));
                     }
                 });
             }
-            config.whitelistEnabled = view.getBoolean(prefix + "_enabled", false);
-            config.whitelistEditMode = view.getBoolean(prefix + "_editMode", false);
+            config.whitelistEnabled = view.getBooleanOr(prefix + "_enabled", false);
+            config.whitelistEditMode = view.getBooleanOr(prefix + "_editMode", false);
             config.setWhitelist(items);
         }
     }
 
     @Override
-    public void readData(ReadView view) {
-        super.readData(view);
+    public void loadAdditional(ValueInput view) {
+        super.loadAdditional(view);
 
         // Probes
-        int probeCount = view.getInt("probe_count", 0);
+        int probeCount = view.getIntOr("probe_count", 0);
         for (int i = 0; i < probeCount; i++) {
-            view.getOptionalLong("probe_" + i).ifPresent(posLong ->
-                    probeRegistry.addProbe(BlockPos.fromLong(posLong))
+            view.getLong("probe_" + i).ifPresent(posLong ->
+                    probeRegistry.addProbe(BlockPos.of(posLong))
             );
         }
 
         // Intakes
         linkedIntakes.clear();
-        int intakeCount = view.getInt("intake_count", 0);
+        int intakeCount = view.getIntOr("intake_count", 0);
         for (int i = 0; i < intakeCount; i++) {
-            view.getOptionalLong("intake_" + i).ifPresent(posLong ->
-                    linkedIntakes.add(BlockPos.fromLong(posLong))
+            view.getLong("intake_" + i).ifPresent(posLong ->
+                    linkedIntakes.add(BlockPos.of(posLong))
             );
         }
 
         // Process probes
-        NbtList ppList = new NbtList();
-        int ppCount = view.getInt("processProbeCount", 0);
+        ListTag ppList = new ListTag();
+        int ppCount = view.getIntOr("processProbeCount", 0);
         for (int i = 0; i < ppCount; i++) {
-            NbtCompound ppNbt = new NbtCompound();
+            CompoundTag ppNbt = new CompoundTag();
             final int index = i;
 
-            view.getOptionalLong("pp_pos_" + index).ifPresent(pos -> ppNbt.putLong("position", pos));
+            view.getLong("pp_pos_" + index).ifPresent(pos -> ppNbt.putLong("position", pos));
 
-            String customName = view.getString("pp_name_" + index, "");
+            String customName = view.getStringOr("pp_name_" + index, "");
             if (!customName.isEmpty()) {
                 ppNbt.putString("customName", customName);
             }
 
-            ppNbt.putString("machineType", view.getString("pp_type_" + index, "Unknown"));
-            ppNbt.putBoolean("enabled", view.getBoolean("pp_enabled_" + index, true));
-            ppNbt.putString("recipeFilter", view.getString("pp_recipe_" + index, "ORES_ONLY"));
-            ppNbt.putString("fuelFilter", view.getString("pp_fuel_" + index, "COAL_ONLY"));
-            ppNbt.putInt("itemsProcessed", view.getInt("pp_processed_" + index, 0));
-            ppNbt.putInt("index", view.getInt("pp_index_" + index, 0));
+            ppNbt.putString("machineType", view.getStringOr("pp_type_" + index, "Unknown"));
+            ppNbt.putBoolean("enabled", view.getBooleanOr("pp_enabled_" + index, true));
+            ppNbt.putString("recipeFilter", view.getStringOr("pp_recipe_" + index, "ORES_ONLY"));
+            ppNbt.putString("fuelFilter", view.getStringOr("pp_fuel_" + index, "COAL_ONLY"));
+            ppNbt.putInt("itemsProcessed", view.getIntOr("pp_processed_" + index, 0));
+            ppNbt.putInt("index", view.getIntOr("pp_index_" + index, 0));
 
             ppList.add(ppNbt);
         }
         processProbeManager.readFromNbt(ppList);
 
         // XP
-        storedExperience = view.getInt("storedXp", 0);
+        storedExperience = view.getIntOr("storedXp", 0);
 
         // Chest configs
-        NbtList chestList = new NbtList();
-        int chestCount = view.getInt("chestConfigCount", 0);
+        ListTag chestList = new ListTag();
+        int chestCount = view.getIntOr("chestConfigCount", 0);
         for (int i = 0; i < chestCount; i++) {
             final int index = i;
-            NbtCompound chestNbt = new NbtCompound();
+            CompoundTag chestNbt = new CompoundTag();
 
-            view.getOptionalLong("chest_pos_" + index).ifPresent(pos -> chestNbt.putLong("Pos", pos));
-            chestNbt.putString("Name", view.getString("chest_name_" + index, ""));
-            chestNbt.putString("Category", view.getString("chest_cat_" + index, "smartsorter:all"));
-            chestNbt.putInt("Priority", view.getInt("chest_pri_" + index, 1));
-            chestNbt.putString("Mode", view.getString("chest_mode_" + index, "NONE"));
-            chestNbt.putBoolean("AutoFrame", view.getBoolean("chest_frame_" + index, false));
+            view.getLong("chest_pos_" + index).ifPresent(pos -> chestNbt.putLong("Pos", pos));
+            chestNbt.putString("Name", view.getStringOr("chest_name_" + index, ""));
+            chestNbt.putString("Category", view.getStringOr("chest_cat_" + index, "smartsorter:all"));
+            chestNbt.putInt("Priority", view.getIntOr("chest_pri_" + index, 1));
+            chestNbt.putString("Mode", view.getStringOr("chest_mode_" + index, "NONE"));
+            chestNbt.putBoolean("AutoFrame", view.getBooleanOr("chest_frame_" + index, false));
 
-            String simplePri = view.getString("chest_spri_" + index, "");
+            String simplePri = view.getStringOr("chest_spri_" + index, "");
             if (!simplePri.isEmpty()) {
                 chestNbt.putString("SimplePriority", simplePri);
             }
@@ -731,86 +747,22 @@ public class StorageControllerBlockEntity extends BlockEntity
         chestConfigManager.readFromNbt(chestList);
         readWhitelists(view);
     }
-    //?} else {
-    /*@Override
-    protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
-        super.writeNbt(nbt, registryLookup);
-
-        // Probes
-        NbtList probeList = new NbtList();
-        for (BlockPos probe : probeRegistry.getLinkedProbes()) {
-            probeList.add(NbtLong.of(probe.asLong()));
-        }
-        nbt.put("Probes", probeList);
-
-        // Intakes
-        NbtList intakeList = new NbtList();
-        for (BlockPos intake : linkedIntakes) {
-            intakeList.add(NbtLong.of(intake.asLong()));
-        }
-        nbt.put("Intakes", intakeList);
-
-        // Process probes
-        nbt.put("ProcessProbes", processProbeManager.writeToNbt());
-
-        // Chest configs
-        nbt.put("ChestConfigs", chestConfigManager.writeToNbt());
-
-        // XP
-        nbt.putInt("StoredXP", storedExperience);
-    }
-
-    @Override
-    protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
-        super.readNbt(nbt, registryLookup);
-
-        // Probes
-        if (nbt.contains("Probes", NbtElement.LIST_TYPE)) {
-            NbtList probeList = nbt.getList("Probes", NbtElement.LONG_TYPE);
-            for (int i = 0; i < probeList.size(); i++) {
-                probeRegistry.addProbe(BlockPos.fromLong(((NbtLong)probeList.get(i)).longValue()));
-            }
-        }
-
-        // Intakes
-        linkedIntakes.clear();
-        if (nbt.contains("Intakes", NbtElement.LIST_TYPE)) {
-            NbtList intakeList = nbt.getList("Intakes", NbtElement.LONG_TYPE);
-            for (int i = 0; i < intakeList.size(); i++) {
-                linkedIntakes.add(BlockPos.fromLong(((NbtLong)intakeList.get(i)).longValue()));
-            }
-        }
-
-        // Process probes
-        if (nbt.contains("ProcessProbes", NbtElement.LIST_TYPE)) {
-            processProbeManager.readFromNbt(nbt.getList("ProcessProbes", NbtElement.COMPOUND_TYPE));
-        }
-
-        // Chest configs
-        if (nbt.contains("ChestConfigs", NbtElement.LIST_TYPE)) {
-            chestConfigManager.readFromNbt(nbt.getList("ChestConfigs", NbtElement.COMPOUND_TYPE));
-        }
-
-        // XP
-        storedExperience = nbt.getInt("StoredXP");
-    }
-    *///?}
 
     // ========================================
     // INVENTORY INTERFACE (Empty - controller doesn't store items)
     // ========================================
 
-    @Override public int size() { return 0; }
+    @Override public int getContainerSize() { return 0; }
     @Override public boolean isEmpty() { return true; }
-    @Override public ItemStack getStack(int slot) { return ItemStack.EMPTY; }
-    @Override public ItemStack removeStack(int slot, int amount) { return ItemStack.EMPTY; }
-    @Override public ItemStack removeStack(int slot) { return ItemStack.EMPTY; }
-    @Override public void setStack(int slot, ItemStack stack) {}
-    @Override public void clear() {}
+    @Override public ItemStack getItem(int slot) { return ItemStack.EMPTY; }
+    @Override public ItemStack removeItem(int slot, int amount) { return ItemStack.EMPTY; }
+    @Override public ItemStack removeItemNoUpdate(int slot) { return ItemStack.EMPTY; }
+    @Override public void setItem(int slot, ItemStack stack) {}
+    @Override public void clearContent() {}
 
     @Override
-    public boolean canPlayerUse(PlayerEntity player) {
-        return pos.isWithinDistance(player.getBlockPos(), 8.0);
+    public boolean stillValid(Player player) {
+        return worldPosition.closerThan(player.blockPosition(), 8.0);
     }
 
     // ========================================
@@ -818,13 +770,13 @@ public class StorageControllerBlockEntity extends BlockEntity
     // ========================================
 
     @Override
-    public Text getDisplayName() {
-        return Text.translatable("container.smartsorter.storage_controller");
+    public Component getDisplayName() {
+        return Component.translatable("container.smartsorter.storage_controller");
     }
 
     @Nullable
     @Override
-    public ScreenHandler createMenu(int syncId, PlayerInventory playerInventory, PlayerEntity player) {
+    public AbstractContainerMenu createMenu(int syncId, Inventory playerInventory, Player player) {
         return new StorageControllerScreenHandler(syncId, playerInventory, this);
     }
 
@@ -833,35 +785,33 @@ public class StorageControllerBlockEntity extends BlockEntity
     // ========================================
 
     public void onRemoved() {
-        if (world instanceof ServerWorld serverWorld) {
-            ChunkKeeper.unregister(serverWorld, pos);
+        if (level instanceof ServerLevel serverWorld) {
+            ChunkKeeper.unregister(serverWorld, worldPosition);
         }
-        if (world != null && !world.isClient()) {
+        if (level != null && !level.isClientSide()) {
             // Drop XP as experience orbs
             if (storedExperience > 0) {
                 // Spawn XP orbs
-                net.minecraft.entity.ExperienceOrbEntity.spawn(
-                        (ServerWorld) world,
-                        net.minecraft.util.math.Vec3d.ofCenter(pos),
+                net.minecraft.world.entity.ExperienceOrb.award(
+                        (ServerLevel) level,
+                        net.minecraft.world.phys.Vec3.atCenterOf(worldPosition),
                         storedExperience
                 );
 
                 // Notify nearby players
-                for (net.minecraft.server.network.ServerPlayerEntity player :
-                        ((ServerWorld) world).getPlayers()) {
-                    double distance = player.squaredDistanceTo(
-                            pos.getX() + 0.5,
-                            pos.getY() + 0.5,
-                            pos.getZ() + 0.5
+                for (net.minecraft.server.level.ServerPlayer player :
+                        ((ServerLevel) level).players()) {
+                    double distance = player.distanceToSqr(
+                            worldPosition.getX() + 0.5,
+                            worldPosition.getY() + 0.5,
+                            worldPosition.getZ() + 0.5
                     );
 
                     if (distance < 256) { // 16 blocks
-                        player.sendMessage(
-                                net.minecraft.text.Text.literal(
+                        player.sendSystemMessage(
+                                net.minecraft.network.chat.Component.literal(
                                         "§a[Smart Sorter] §e" + storedExperience + " XP dropped from controller!"
-                                ).formatted(net.minecraft.util.Formatting.YELLOW),
-                                false
-                        );
+                                ).withStyle(net.minecraft.ChatFormatting.YELLOW));
                     }
                 }
 
@@ -870,32 +820,39 @@ public class StorageControllerBlockEntity extends BlockEntity
 
             // Unlink all probes (ensure they keep their configs)
             for (BlockPos probePos : probeRegistry.getLinkedProbes()) {
-                BlockEntity be = world.getBlockEntity(probePos);
+                BlockEntity be = level.getBlockEntity(probePos);
                 if (be instanceof OutputProbeBlockEntity probe) {
-                    probe.removeController(this.pos);
+                    probe.removeController(this.worldPosition);
                 }
             }
 
             // Unlink intakes
             for (BlockPos intakePos : linkedIntakes) {
-                BlockEntity be = world.getBlockEntity(intakePos);
+                BlockEntity be = level.getBlockEntity(intakePos);
                 if (be instanceof IntakeBlockEntity intake) {
                     intake.clearController();
                 }
             }
 
             // Unlink process probes (they should keep configs)
-            processProbeManager.unlinkAll(world);
+            processProbeManager.unlinkAll(level);
 
             // Clear chest names
-            chestConfigManager.clearAllChestNames(world);
+            chestConfigManager.clearAllChestNames(level);
         }
     }
 
     private void updateListeners() {
-        if (world != null) {
-            BlockState state = world.getBlockState(pos);
-            world.updateListeners(pos, state, state, 3);
+        if (level != null) {
+            BlockState state = level.getBlockState(worldPosition);
+            level.sendBlockUpdated(worldPosition, state, state, 3);
         }
+    }
+
+    /** Runs before the block entity is removed, for every kind of removal. */
+    @Override
+    public void preRemoveSideEffects(BlockPos pos, BlockState state) {
+        super.preRemoveSideEffects(pos, state);
+        onRemoved();
     }
 }

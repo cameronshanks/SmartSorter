@@ -2,42 +2,37 @@ package net.shaddii.smartsorter;
 
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
-import net.fabricmc.fabric.api.itemgroup.v1.FabricItemGroup;
+import net.fabricmc.fabric.api.creativetab.v1.FabricCreativeModeTab;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.fabricmc.fabric.api.entity.event.v1.ServerEntityLevelChangeEvents;
 import net.fabricmc.fabric.api.object.builder.v1.block.entity.FabricBlockEntityTypeBuilder;
-//? if >=1.21.9 {
 import net.fabricmc.fabric.api.resource.v1.ResourceLoader;
-//?} else {
-/*import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
- *///?}
-import net.fabricmc.fabric.api.screenhandler.v1.ExtendedScreenHandlerType;
+import net.fabricmc.fabric.api.menu.v1.ExtendedMenuType;
 
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
-import net.minecraft.block.AbstractBlock;
-import net.minecraft.block.Block;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.block.entity.BlockEntityType;
-import net.minecraft.item.BlockItem;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.Registry;
-//? if > 1.21.1 {
-import net.minecraft.registry.RegistryKey;
-import net.minecraft.registry.RegistryKeys;
-//?}
-import net.minecraft.resource.ResourceType;
-import net.minecraft.screen.ScreenHandlerType;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.sound.SoundCategory;
-import net.minecraft.sound.SoundEvents;
-import net.minecraft.text.Text;
-import net.minecraft.util.ActionResult;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Registry;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.packs.PackType;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.inventory.MenuType;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.shaddii.smartsorter.block.*;
 import net.shaddii.smartsorter.blockentity.*;
 import net.shaddii.smartsorter.item.LinkingToolItem;
@@ -82,8 +77,8 @@ public class SmartSorter implements ModInitializer {
     public static BlockEntityType<EnderChestProbeBlockEntity> ENDER_PROBE_BE_TYPE;
 
     // === Screen Handlers ===
-    public static ScreenHandlerType<StorageControllerScreenHandler> STORAGE_CONTROLLER_SCREEN_HANDLER;
-    public static ScreenHandlerType<OutputProbeScreenHandler> OUTPUT_PROBE_SCREEN_HANDLER;
+    public static MenuType<StorageControllerScreenHandler> STORAGE_CONTROLLER_SCREEN_HANDLER;
+    public static MenuType<OutputProbeScreenHandler> OUTPUT_PROBE_SCREEN_HANDLER;
 
     @Override
     public void onInitialize() {
@@ -99,39 +94,39 @@ public class SmartSorter implements ModInitializer {
         registerNetworkPayloads();
         registerNetworkHandlers();
         WhitelistNetworking.register();
+
+        // Linking Tool selections are plain positions; drop them when they stop making sense
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
+                LinkingToolItem.clearSelection(handler.getPlayer().getUUID()));
+        ServerEntityLevelChangeEvents.AFTER_PLAYER_CHANGE_LEVEL.register((player, origin, destination) ->
+                LinkingToolItem.clearSelection(player.getUUID()));
         registerEvents();
         ChunkedSorter.init();
 
         // Register the category manager
-        //? if >=1.21.9 {
-        ResourceLoader.get(ResourceType.SERVER_DATA)
-                .registerReloader
+        ResourceLoader.get(PackType.SERVER_DATA)
+                .registerReloadListener
                 (
-                        Identifier.of("smartsorter", "category_manager"),
+                        Identifier.fromNamespaceAndPath("smartsorter", "category_manager"),
                         CategoryManager.getInstance()
                 );
-    //?} else {
-        /*ResourceManagerHelper.get(ResourceType.SERVER_DATA)
-                .registerReloadListener(CategoryManager.getInstance());
-    *///?}
     }
 
-    //? if >=1.21.8 {
-    private static void writeNameToChestDirect(net.minecraft.world.World world, BlockPos chestPos, String customName) {
-        if (world == null || world.isClient()) return;
+    private static void writeNameToChestDirect(net.minecraft.world.level.Level world, BlockPos chestPos, String customName) {
+        if (world == null || world.isClientSide()) return;
 
         BlockEntity blockEntity = world.getBlockEntity(chestPos);
         if (blockEntity == null) return;
 
-        NbtCompound nbt = blockEntity.createNbt(world.getRegistryManager());
+        CompoundTag nbt = blockEntity.saveWithoutMetadata(world.registryAccess());
 
         if (customName == null || customName.isEmpty()) {
             nbt.remove("CustomName");
         } else {
-            net.minecraft.text.Text textComponent = net.minecraft.text.Text.literal(customName);
-            com.mojang.serialization.DataResult<net.minecraft.nbt.NbtElement> result =
-                    net.minecraft.text.TextCodecs.CODEC.encodeStart(
-                            world.getRegistryManager().getOps(net.minecraft.nbt.NbtOps.INSTANCE),
+            net.minecraft.network.chat.Component textComponent = net.minecraft.network.chat.Component.literal(customName);
+            com.mojang.serialization.DataResult<net.minecraft.nbt.Tag> result =
+                    net.minecraft.network.chat.ComponentSerialization.CODEC.encodeStart(
+                            world.registryAccess().createSerializationContext(net.minecraft.nbt.NbtOps.INSTANCE),
                             textComponent
                     );
             result.result().ifPresent(nbtElement -> {
@@ -139,89 +134,46 @@ public class SmartSorter implements ModInitializer {
             });
         }
 
-        try (net.minecraft.util.ErrorReporter.Logging logging =
-                     new net.minecraft.util.ErrorReporter.Logging(
-                             blockEntity.getReporterContext(),
+        try (net.minecraft.util.ProblemReporter.ScopedCollector logging =
+                     new net.minecraft.util.ProblemReporter.ScopedCollector(
+                             blockEntity.problemPath(),
                              com.mojang.logging.LogUtils.getLogger())) {
-            blockEntity.read(net.minecraft.storage.NbtReadView.create(logging, world.getRegistryManager(), nbt));
+            blockEntity.loadWithComponents(net.minecraft.world.level.storage.TagValueInput.create(logging, world.registryAccess(), nbt));
         }
-        blockEntity.markDirty();
+        blockEntity.setChanged();
 
-        net.minecraft.block.BlockState state = world.getBlockState(chestPos);
-        world.updateListeners(chestPos, state, state, 3);
+        net.minecraft.world.level.block.state.BlockState state = world.getBlockState(chestPos);
+        world.sendBlockUpdated(chestPos, state, state, 3);
     }
-//?} else {
-/*private static void writeNameToChestDirect(net.minecraft.world.World world, BlockPos chestPos, String customName) {
-    if (world == null || world.isClient()) return;
-
-    BlockEntity blockEntity = world.getBlockEntity(chestPos);
-    if (blockEntity == null) return;
-
-    NbtCompound nbt = blockEntity.createNbt(world.getRegistryManager());
-
-    if (customName == null || customName.isEmpty()) {
-        nbt.remove("CustomName");
-    } else {
-        net.minecraft.text.Text textComponent = net.minecraft.text.Text.literal(customName);
-        nbt.putString("CustomName", net.minecraft.text.Text.Serialization.toJsonString(textComponent, world.getRegistryManager()));
-    }
-
-    blockEntity.read(nbt, world.getRegistryManager());
-    blockEntity.markDirty();
-
-    net.minecraft.block.BlockState state = world.getBlockState(chestPos);
-    world.updateListeners(chestPos, state, state, 3);
-}
-*///?}
 
     // ------------------------------------------------------
     // Blocks
     // ------------------------------------------------------
-    //? if > 1.21.1 {
     
     private void registerBlocks() {
         INTAKE_BLOCK = registerBlock("intake",
-                new IntakeBlock(AbstractBlock.Settings.create()
-                        .registryKey(RegistryKey.of(RegistryKeys.BLOCK, id("intake")))
-                        .strength(0.6F).nonOpaque()));
+                new IntakeBlock(BlockBehaviour.Properties.of()
+                        .setId(ResourceKey.create(Registries.BLOCK, id("intake")))
+                        .strength(0.6F).noOcclusion()));
 
         PROBE_BLOCK = registerBlock("output_probe",
-                new OutputProbeBlock(AbstractBlock.Settings.create()
-                        .registryKey(RegistryKey.of(RegistryKeys.BLOCK, id("output_probe")))
-                        .strength(0.6F).nonOpaque()));
+                new OutputProbeBlock(BlockBehaviour.Properties.of()
+                        .setId(ResourceKey.create(Registries.BLOCK, id("output_probe")))
+                        .strength(0.6F).noOcclusion()));
 
         STORAGE_CONTROLLER_BLOCK = registerBlock("storage_controller",
-                new StorageControllerBlock(AbstractBlock.Settings.create()
-                        .registryKey(RegistryKey.of(RegistryKeys.BLOCK, id("storage_controller")))
+                new StorageControllerBlock(BlockBehaviour.Properties.of()
+                        .setId(ResourceKey.create(Registries.BLOCK, id("storage_controller")))
                         .strength(0.6F)));
         PROCESS_PROBE_BLOCK = registerBlock("process_probe",
-                new ProcessProbeBlock(AbstractBlock.Settings.create()
-                        .registryKey(RegistryKey.of(RegistryKeys.BLOCK, id("process_probe")))
-                        .strength(0.6F).nonOpaque()));
+                new ProcessProbeBlock(BlockBehaviour.Properties.of()
+                        .setId(ResourceKey.create(Registries.BLOCK, id("process_probe")))
+                        .strength(0.6F).noOcclusion()));
     }
-    //?} else {
 
-    /*private void registerBlocks() {
-        INTAKE_BLOCK = registerBlock("intake",
-                new IntakeBlock(AbstractBlock.Settings.create()
-                        .strength(0.6F).nonOpaque()));
-
-        PROBE_BLOCK = registerBlock("output_probe",
-                new OutputProbeBlock(AbstractBlock.Settings.create()
-                        .strength(0.6F).nonOpaque()));
-
-        STORAGE_CONTROLLER_BLOCK = registerBlock("storage_controller",
-                new StorageControllerBlock(AbstractBlock.Settings.create()
-                        .strength(0.6F)));
-
-        PROCESS_PROBE_BLOCK = registerBlock("process_probe",
-                new ProcessProbeBlock(AbstractBlock.Settings.create()
-                        .strength(0.6F).nonOpaque()));
-    }
-    *///?}
 
     private Block registerBlock(String name, Block block) {
-        return Registry.register(Registries.BLOCK, id(name), block);
+        return Registry.register(BuiltInRegistries.BLOCK, id(name), block);
     }
 
     // ------------------------------------------------------
@@ -235,17 +187,13 @@ public class SmartSorter implements ModInitializer {
     }
 
     private Item registerBlockItem(String name, Block block) {
-        //? if > 1.21.1 {
         
-        Item.Settings settings = new Item.Settings()
-                .registryKey(RegistryKey.of(RegistryKeys.ITEM, id(name)));
-        //?} else {
-        /*Item.Settings settings = new Item.Settings();
-        *///?}
+        Item.Properties settings = new Item.Properties()
+                .setId(ResourceKey.create(Registries.ITEM, id(name)));
         // Create a custom BlockItem that uses the block's name
-        return Registry.register(Registries.ITEM, id(name), new BlockItem(block, settings) {
+        return Registry.register(BuiltInRegistries.ITEM, id(name), new BlockItem(block, settings) {
             @Override
-            public Text getName(ItemStack stack) {
+            public Component getName(ItemStack stack) {
                 return block.getName(); // uses "block.smartsorter.intake" instead of "item.smartsorter.intake"
             }
         });
@@ -257,19 +205,19 @@ public class SmartSorter implements ModInitializer {
     // ------------------------------------------------------
     private void registerBlockEntities() {
         INTAKE_BE_TYPE = Registry.register(
-                Registries.BLOCK_ENTITY_TYPE, id("intake"),
+                BuiltInRegistries.BLOCK_ENTITY_TYPE, id("intake"),
                 FabricBlockEntityTypeBuilder.create(IntakeBlockEntity::new, INTAKE_BLOCK).build());
         PROBE_BE_TYPE = Registry.register(
-                Registries.BLOCK_ENTITY_TYPE, id("output_probe"),
+                BuiltInRegistries.BLOCK_ENTITY_TYPE, id("output_probe"),
                 FabricBlockEntityTypeBuilder.create(OutputProbeBlockEntity::new, PROBE_BLOCK).build());
         STORAGE_CONTROLLER_BE_TYPE = Registry.register(
-                Registries.BLOCK_ENTITY_TYPE, id("storage_controller"),
+                BuiltInRegistries.BLOCK_ENTITY_TYPE, id("storage_controller"),
                 FabricBlockEntityTypeBuilder.create(StorageControllerBlockEntity::new, STORAGE_CONTROLLER_BLOCK).build());
         PROCESS_PROBE_BE_TYPE = Registry.register(
-                Registries.BLOCK_ENTITY_TYPE, id("process_probe"),
+                BuiltInRegistries.BLOCK_ENTITY_TYPE, id("process_probe"),
                 FabricBlockEntityTypeBuilder.create(ProcessProbeBlockEntity::new, PROCESS_PROBE_BLOCK).build());
         ENDER_PROBE_BE_TYPE = Registry.register(
-                Registries.BLOCK_ENTITY_TYPE, id("ender_chest_probe"),
+                BuiltInRegistries.BLOCK_ENTITY_TYPE, id("ender_chest_probe"),
                 FabricBlockEntityTypeBuilder.create(EnderChestProbeBlockEntity::new, PROBE_BLOCK).build());
     }
 
@@ -278,31 +226,26 @@ public class SmartSorter implements ModInitializer {
     // ------------------------------------------------------
     private void registerScreens() {
         STORAGE_CONTROLLER_SCREEN_HANDLER = Registry.register(
-                Registries.SCREEN_HANDLER, id("storage_controller"),
-                new ScreenHandlerType<>(StorageControllerScreenHandler::new, null));
+                BuiltInRegistries.MENU, id("storage_controller"),
+                new MenuType<>(StorageControllerScreenHandler::new, null));
 
         OUTPUT_PROBE_SCREEN_HANDLER = Registry.register(
-                Registries.SCREEN_HANDLER, id("output_probe"),
-                new ExtendedScreenHandlerType<>(OutputProbeScreenHandler::new, OutputProbeBlockEntity.ProbeData.CODEC));
+                BuiltInRegistries.MENU, id("output_probe"),
+                new ExtendedMenuType<>(OutputProbeScreenHandler::new, OutputProbeBlockEntity.ProbeData.CODEC));
     }
 
     // ------------------------------------------------------
     // Tools
     // ------------------------------------------------------
     private void registerTools() {
-        //? if > 1.21.1 {
         
         // Create settings with registry key pre-set
-        Item.Settings settings = new Item.Settings()
-                .registryKey(RegistryKey.of(RegistryKeys.ITEM, id("linking_tool")))
-                .maxCount(1);
-        //?} else {
-        /*Item.Settings settings = new Item.Settings()
-                .maxCount(1);
-        *///?}
+        Item.Properties settings = new Item.Properties()
+                .setId(ResourceKey.create(Registries.ITEM, id("linking_tool")))
+                .stacksTo(1);
 
         LINKING_TOOL = Registry.register(
-                Registries.ITEM, id("linking_tool"),
+                BuiltInRegistries.ITEM, id("linking_tool"),
                 new LinkingToolItem(settings));
     }
 
@@ -310,16 +253,16 @@ public class SmartSorter implements ModInitializer {
     // Creative Tab
     // ------------------------------------------------------
     private void registerCreativeTab() {
-        Registry.register(Registries.ITEM_GROUP, id("smartsorter_group"),
-                FabricItemGroup.builder()
-                        .displayName(Text.translatable("itemGroup.smartsorter"))
+        Registry.register(BuiltInRegistries.CREATIVE_MODE_TAB, id("smartsorter_group"),
+                FabricCreativeModeTab.builder()
+                        .title(Component.translatable("itemGroup.smartsorter"))
                         .icon(() -> new ItemStack(STORAGE_CONTROLLER_ITEM))
-                        .entries((ctx, entries) -> {
-                            entries.add(STORAGE_CONTROLLER_ITEM);
-                            entries.add(INTAKE_ITEM);
-                            entries.add(PROBE_ITEM);
-                            entries.add(PROCESS_PROBE_ITEM);
-                            entries.add(LINKING_TOOL);
+                        .displayItems((ctx, entries) -> {
+                            entries.accept(STORAGE_CONTROLLER_ITEM);
+                            entries.accept(INTAKE_ITEM);
+                            entries.accept(PROBE_ITEM);
+                            entries.accept(PROCESS_PROBE_ITEM);
+                            entries.accept(LINKING_TOOL);
                         })
                         .build());
     }
@@ -331,82 +274,82 @@ public class SmartSorter implements ModInitializer {
     // =====================================================
     // Server to Client (S2C) - Server sends to client
     // =====================================================
-        PayloadTypeRegistry.playS2C().register(
+        PayloadTypeRegistry.clientboundPlay().register(
                 StorageControllerSyncPacket.SyncPayload.ID_PAYLOAD,
                 StorageControllerSyncPacket.SyncPayload.CODEC);
 
-        PayloadTypeRegistry.playS2C().register(
+        PayloadTypeRegistry.clientboundPlay().register(
                 ProbeStatsSyncPayload.ID,
                 ProbeStatsSyncPayload.CODEC);
 
-        PayloadTypeRegistry.playS2C().register(
+        PayloadTypeRegistry.clientboundPlay().register(
                 ProbeConfigBatchPayload.ID,
                 ProbeConfigBatchPayload.CODEC);
 
-        PayloadTypeRegistry.playS2C().register(
+        PayloadTypeRegistry.clientboundPlay().register(
                 ChestConfigBatchPayload.ID,
                 ChestConfigBatchPayload.CODEC);
 
-        PayloadTypeRegistry.playS2C().register(
+        PayloadTypeRegistry.clientboundPlay().register(
                 ChestConfigUpdatePayload.ID,
                 ChestConfigUpdatePayload.CODEC);
 
-        PayloadTypeRegistry.playS2C().register(
+        PayloadTypeRegistry.clientboundPlay().register(
                 OverflowNotificationPayload.ID,
                 OverflowNotificationPayload.CODEC);
 
-        PayloadTypeRegistry.playS2C().register(
+        PayloadTypeRegistry.clientboundPlay().register(
                 StorageDeltaSyncPayload.ID,
                 StorageDeltaSyncPayload.CODEC);
 
-        PayloadTypeRegistry.playS2C().register(
+        PayloadTypeRegistry.clientboundPlay().register(
                 SortProgressPayload.ID,
                 SortProgressPayload.CODEC);
 
-        PayloadTypeRegistry.playS2C().register(
+        PayloadTypeRegistry.clientboundPlay().register(
                 ChestPriorityBatchPayload.ID,
                 ChestPriorityBatchPayload.CODEC);
 
-        PayloadTypeRegistry.playS2C().register(
+        PayloadTypeRegistry.clientboundPlay().register(
                 CategorySyncPayload.ID,
                 CategorySyncPayload.CODEC);
 
         // =====================================================
         // Client to Server (C2S) - Client sends to server
         // =====================================================
-        PayloadTypeRegistry.playC2S().register(
+        PayloadTypeRegistry.serverboundPlay().register(
                 StorageControllerScreenHandler.ExtractionRequestPayload.ID,
                 StorageControllerScreenHandler.ExtractionRequestPayload.CODEC);
 
-        PayloadTypeRegistry.playC2S().register(
+        PayloadTypeRegistry.serverboundPlay().register(
                 StorageControllerScreenHandler.SyncRequestPayload.ID,
                 StorageControllerScreenHandler.SyncRequestPayload.CODEC);
 
-        PayloadTypeRegistry.playC2S().register(
+        PayloadTypeRegistry.serverboundPlay().register(
                 StorageControllerScreenHandler.DepositRequestPayload.ID,
                 StorageControllerScreenHandler.DepositRequestPayload.CODEC);
 
-        PayloadTypeRegistry.playC2S().register(
+        PayloadTypeRegistry.serverboundPlay().register(
                 SortModeChangePayload.ID,
                 SortModeChangePayload.CODEC);
 
-        PayloadTypeRegistry.playC2S().register(
+        PayloadTypeRegistry.serverboundPlay().register(
                 FilterCategoryChangePayload.ID,
                 FilterCategoryChangePayload.CODEC);
 
-        PayloadTypeRegistry.playC2S().register(
+        PayloadTypeRegistry.serverboundPlay().register(
                 CollectXpPayload.ID,
                 CollectXpPayload.CODEC);
 
-        PayloadTypeRegistry.playC2S().register(
+        PayloadTypeRegistry.serverboundPlay().register(
                 ProbeConfigUpdatePayload.ID,
                 ProbeConfigUpdatePayload.CODEC);
 
-        PayloadTypeRegistry.playC2S().register(
+        PayloadTypeRegistry.serverboundPlay().register(
                 ChestConfigUpdatePayload.ID,
                 ChestConfigUpdatePayload.CODEC);
 
-        PayloadTypeRegistry.playC2S().register(
+        PayloadTypeRegistry.serverboundPlay().register(
                 SortChestsPayload.ID,
                 SortChestsPayload.CODEC);
     }
@@ -416,8 +359,8 @@ public class SmartSorter implements ModInitializer {
         ServerPlayNetworking.registerGlobalReceiver(
                 StorageControllerScreenHandler.ExtractionRequestPayload.ID,
                 (payload, context) -> context.server().execute(() -> {
-                    ServerPlayerEntity player = context.player();
-                    if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+                    ServerPlayer player = context.player();
+                    if (player.containerMenu instanceof StorageControllerScreenHandler handler) {
                         if (handler.controller != null) {
                             handler.extractItem(payload.variant(), payload.amount(), payload.toInventory(), player);
                             handler.requestImmediateSync(player); // Force sync
@@ -429,8 +372,8 @@ public class SmartSorter implements ModInitializer {
         ServerPlayNetworking.registerGlobalReceiver(
                 StorageControllerScreenHandler.DepositRequestPayload.ID,
                 (payload, context) -> context.server().execute(() -> {
-                    ServerPlayerEntity player = context.player();
-                    if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+                    ServerPlayer player = context.player();
+                    if (player.containerMenu instanceof StorageControllerScreenHandler handler) {
                         if (handler.controller != null) {
                             ItemStack stack = payload.variant().toStack(payload.amount());
                             handler.depositItem(stack, payload.amount(), player);
@@ -441,8 +384,8 @@ public class SmartSorter implements ModInitializer {
 
         ServerPlayNetworking.registerGlobalReceiver(SortChestsPayload.ID, (payload, context) -> {
             context.server().execute(() -> {
-                ServerPlayerEntity player = context.player();
-                if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+                ServerPlayer player = context.player();
+                if (player.containerMenu instanceof StorageControllerScreenHandler handler) {
                     StorageControllerBlockEntity controller = handler.controller;
                     if (controller != null) {
                         ChunkedSorter.startSorting(player, controller, payload.sortedPositions());
@@ -455,7 +398,7 @@ public class SmartSorter implements ModInitializer {
         ServerPlayNetworking.registerGlobalReceiver(
                 StorageControllerScreenHandler.SyncRequestPayload.ID,
                 (payload, context) -> context.server().execute(() -> {
-                    if (context.player().currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+                    if (context.player().containerMenu instanceof StorageControllerScreenHandler handler) {
                         // When a client manually requests a sync, it always needs the full data.
                         handler.sendNetworkUpdate(context.player());
                     }
@@ -465,7 +408,7 @@ public class SmartSorter implements ModInitializer {
         ServerPlayNetworking.registerGlobalReceiver(
                 SortModeChangePayload.ID,
                 (payload, context) -> context.server().execute(() -> {
-                    if (context.player().currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+                    if (context.player().containerMenu instanceof StorageControllerScreenHandler handler) {
                         handler.setSortMode(payload.getSortMode());
                         handler.sendNetworkUpdate(context.player());
                     }
@@ -475,7 +418,7 @@ public class SmartSorter implements ModInitializer {
         ServerPlayNetworking.registerGlobalReceiver(
                 FilterCategoryChangePayload.ID,
                 (payload, context) -> context.server().execute(() -> {
-                    if (context.player().currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+                    if (context.player().containerMenu instanceof StorageControllerScreenHandler handler) {
                         handler.setFilterCategory(payload.getCategory());
                         handler.sendNetworkUpdate(context.player());
                     }
@@ -484,29 +427,25 @@ public class SmartSorter implements ModInitializer {
         // XP Collection
         ServerPlayNetworking.registerGlobalReceiver(CollectXpPayload.ID, (payload, context) -> {
             context.server().execute(() -> {
-                ServerPlayerEntity player = context.player();
-                if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+                ServerPlayer player = context.player();
+                if (player.containerMenu instanceof StorageControllerScreenHandler handler) {
                     if (handler.controller != null) {
                         int xp = handler.controller.collectExperience();
                         if (xp > 0) {
                             // Add XP to player
-                            player.addExperience(xp);
+                            player.giveExperiencePoints(xp);
 
                             // Visual feedback
-                            player.sendMessage(Text.literal("§a+§e" + xp + " XP §acollected!"), true);
+                            player.sendOverlayMessage(Component.literal("§a+§e" + xp + " XP §acollected!"));
 
                             // Play sound
-                            //? if >=1.21.9 {
-                            player.getEntityWorld().playSound(
-                            //?} else {
-                                    /*player.getWorld().playSound(
-                            *///?}
+                            player.level().playSound(
                                     null,
                                     player.getX(),
                                     player.getY(),
                                     player.getZ(),
-                                    SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP,
-                                    SoundCategory.PLAYERS,
+                                    SoundEvents.EXPERIENCE_ORB_PICKUP,
+                                    SoundSource.PLAYERS,
                                     0.5f,
                                     1.0f
                             );
@@ -523,9 +462,9 @@ public class SmartSorter implements ModInitializer {
         // Probe config update
         ServerPlayNetworking.registerGlobalReceiver(ProbeConfigUpdatePayload.ID, (payload, context) -> {
             context.server().execute(() -> {
-                ServerPlayerEntity player = context.player();
+                ServerPlayer player = context.player();
 
-                if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+                if (player.containerMenu instanceof StorageControllerScreenHandler handler) {
                     if (handler.controller != null) {
                         ProcessProbeConfig config = handler.controller.getProbeConfig(payload.position());
                         if (config != null) {
@@ -536,7 +475,7 @@ public class SmartSorter implements ModInitializer {
                             config.fuelFilter = payload.fuelFilter();
 
                             handler.controller.updateProbeConfig(config);
-                            handler.controller.markDirty();
+                            handler.controller.setChanged();
                             handler.sendNetworkUpdate(player);
                         }
                     }
@@ -548,16 +487,16 @@ public class SmartSorter implements ModInitializer {
                 ChestConfigUpdatePayload.ID,
                 (payload, context) -> {
                     context.server().execute(() -> {
-                        ServerPlayerEntity player = context.player();
+                        ServerPlayer player = context.player();
                         StorageControllerBlockEntity controller = null;
                         OutputProbeBlockEntity probe = null;
 
                         // Check if open in main controller GUI
-                        if (player.currentScreenHandler instanceof StorageControllerScreenHandler mainHandler) {
+                        if (player.containerMenu instanceof StorageControllerScreenHandler mainHandler) {
                             controller = mainHandler.controller;
                         }
                         // Check if open in probe GUI
-                        else if (player.currentScreenHandler instanceof OutputProbeScreenHandler probeHandler) {
+                        else if (player.containerMenu instanceof OutputProbeScreenHandler probeHandler) {
                             controller = probeHandler.controller;
                             probe = probeHandler.probe;
                         }
@@ -571,10 +510,10 @@ public class SmartSorter implements ModInitializer {
                         if (controller != null) {
                             controller.updateChestConfig(payload.config().position, payload.config());
 
-                            if (player.currentScreenHandler instanceof StorageControllerScreenHandler mainHandler) {
+                            if (player.containerMenu instanceof StorageControllerScreenHandler mainHandler) {
                                 mainHandler.markConfigsDirty();
                                 mainHandler.sendNetworkUpdate(player);
-                            } else if (player.currentScreenHandler instanceof OutputProbeScreenHandler probeHandler) {
+                            } else if (player.containerMenu instanceof OutputProbeScreenHandler probeHandler) {
                                 ChestConfig refreshedConfig = controller.getChestConfig(payload.config().position);
                                 if (refreshedConfig != null) {
                                     probeHandler.setChestConfig(refreshedConfig);
@@ -583,10 +522,10 @@ public class SmartSorter implements ModInitializer {
                             }
                         }
                         // PRIORITY 3: If no controller, manually write the name to the chest
-                        else if (probe != null && probe.getWorld() != null) {
+                        else if (probe != null && probe.getLevel() != null) {
                             BlockPos chestPos = payload.config().position;
                             if (chestPos != null) {
-                                writeNameToChestDirect(probe.getWorld(), chestPos, payload.config().customName);
+                                writeNameToChestDirect(probe.getLevel(), chestPos, payload.config().customName);
                             }
                         }
                     });
@@ -599,12 +538,12 @@ public class SmartSorter implements ModInitializer {
     // Events
     // ------------------------------------------------------
     private void registerEvents() {
-        UseBlockCallback.EVENT.register((player, world, hand, hit) -> ActionResult.PASS);
+        UseBlockCallback.EVENT.register((player, world, hand, hit) -> InteractionResult.PASS);
     }
     // ------------------------------------------------------
     // Utility
     // ------------------------------------------------------
     public static Identifier id(String path) {
-        return Identifier.of(MOD_ID, path);  // Using Identifier.of() instead of new Identifier()
+        return Identifier.fromNamespaceAndPath(MOD_ID, path);  // Using Identifier.of() instead of new Identifier()
     }
 }

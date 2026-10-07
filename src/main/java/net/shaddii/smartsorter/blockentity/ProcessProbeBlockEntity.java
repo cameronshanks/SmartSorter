@@ -1,29 +1,23 @@
 package net.shaddii.smartsorter.blockentity;
 
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.block.entity.AbstractFurnaceBlockEntity;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.World;
+import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
+import net.minecraft.world.phys.Vec3;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.block.ProcessProbeBlock;
 import net.shaddii.smartsorter.blockentity.processor.*;
 import net.shaddii.smartsorter.util.*;
-
-//? if >=1.21.8 {
-import net.minecraft.storage.ReadView;
-import net.minecraft.storage.WriteView;
-//?} else {
-/*import net.minecraft.registry.RegistryWrapper;
- *///?}
 
 /**
  * Process Probe Block Entity - Manages automated furnace processing.
@@ -75,7 +69,7 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         super(SmartSorter.PROCESS_PROBE_BE_TYPE, pos, state);
 
         try {
-            this.facing = state.get(ProcessProbeBlock.FACING);
+            this.facing = state.getValue(ProcessProbeBlock.FACING);
         } catch (Exception e) {
             this.facing = Direction.NORTH;
         }
@@ -92,8 +86,8 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
     // TICK LOGIC
     // ========================================
 
-    public static void tick(World world, BlockPos pos, BlockState state, ProcessProbeBlockEntity be) {
-        if (world == null || world.isClient()) return;
+    public static void tick(Level world, BlockPos pos, BlockState state, ProcessProbeBlockEntity be) {
+        if (world == null || world.isClientSide()) return;
 
         be.tickCounter++;
 
@@ -126,7 +120,7 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         if (be.tickCounter >= TICK_INTERVAL) {
             be.tickCounter = 0;
 
-            if (be.enabled && be.isLinked && world instanceof ServerWorld serverWorld) {
+            if (be.enabled && be.isLinked && world instanceof ServerLevel serverWorld) {
                 be.processTick(serverWorld);
             }
         }
@@ -137,41 +131,41 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         }
     }
 
-    private boolean checkControllerEnabled(World world) {
+    private boolean checkControllerEnabled(Level world) {
         if (controllerPos == null) return true;
 
         BlockEntity controllerBE = world.getBlockEntity(controllerPos);
         if (controllerBE instanceof StorageControllerBlockEntity controller) {
-            ProcessProbeConfig config = controller.getProbeConfig(pos);
+            ProcessProbeConfig config = controller.getProbeConfig(worldPosition);
             return config == null || config.enabled;
         }
 
         return true;
     }
 
-    private void processTick(ServerWorld world) {
+    private void processTick(ServerLevel world) {
         if (controllerPos == null) return;
 
         BlockEntity controllerBE = world.getBlockEntity(controllerPos);
         if (!(controllerBE instanceof StorageControllerBlockEntity controller)) return;
 
-        ProcessProbeConfig config = controller.getProbeConfig(pos);
+        ProcessProbeConfig config = controller.getProbeConfig(worldPosition);
         if (config == null || !config.enabled) return;
 
         // Update facing
         try {
-            BlockState state = world.getBlockState(pos);
-            facing = state.get(ProcessProbeBlock.FACING);
+            BlockState state = world.getBlockState(worldPosition);
+            facing = state.getValue(ProcessProbeBlock.FACING);
         } catch (Exception e) {
             facing = Direction.NORTH;
         }
 
         // Get target machine
-        BlockPos machinePos = pos.offset(facing);
+        BlockPos machinePos = worldPosition.relative(facing);
         BlockEntity blockEntity = world.getBlockEntity(machinePos);
 
         if (blockEntity instanceof AbstractFurnaceBlockEntity smeltingMachine) {
-            smeltingProcessor.processSmeltingMachine(world, pos, smeltingMachine, controller, config);
+            smeltingProcessor.processSmeltingMachine(world, worldPosition, smeltingMachine, controller, config);
 
             // Update config with processed count
             int processedCount = smeltingProcessor.getItemsProcessed();
@@ -186,18 +180,18 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
     // LINKING LOGIC
     // ========================================
 
-    private void attemptLink(World world, BlockState state) {
-        if (!(world instanceof ServerWorld serverWorld)) return;
+    private void attemptLink(Level world, BlockState state) {
+        if (!(world instanceof ServerLevel serverWorld)) return;
 
         // Update facing
         try {
-            facing = state.get(ProcessProbeBlock.FACING);
+            facing = state.getValue(ProcessProbeBlock.FACING);
         } catch (Exception e) {
             facing = Direction.NORTH;
         }
 
         // Check for valid machine
-        BlockPos machinePos = pos.offset(facing);
+        BlockPos machinePos = worldPosition.relative(facing);
         BlockEntity machineEntity = world.getBlockEntity(machinePos);
         BlockState machineState = world.getBlockState(machinePos);
 
@@ -210,18 +204,22 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         updateMachineType(machineState);
         targetMachinePos = machinePos;
 
-        // Find controller through redstone network
-        BlockPos foundController = ControllerFinder.findController(serverWorld, pos);
+        // Use the controller picked with the Linking Tool; otherwise find one
+        // through the redstone network
+        BlockPos foundController = controllerPos != null
+                && world.getBlockEntity(controllerPos) instanceof StorageControllerBlockEntity
+                ? controllerPos
+                : ControllerFinder.findController(serverWorld, worldPosition);
 
         if (foundController != null) {
             BlockEntity be = world.getBlockEntity(foundController);
             if (be instanceof StorageControllerBlockEntity controller) {
-                boolean success = controller.registerProcessProbe(pos, machineType);
+                boolean success = controller.registerProcessProbe(worldPosition, machineType);
 
                 if (success) {
                     this.controllerPos = foundController;
                     isLinked = true;
-                    markDirty();
+                    setChanged();
 
                     String message = String.format("Linked to %s - Link Active", machineType);
                     notifyPlayers(serverWorld, message, true);
@@ -236,13 +234,13 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         }
     }
 
-    private void disconnect(World world) {
-        if (!(world instanceof ServerWorld serverWorld)) return;
+    private void disconnect(Level world) {
+        if (!(world instanceof ServerLevel serverWorld)) return;
 
         if (isLinked && controllerPos != null) {
             BlockEntity be = world.getBlockEntity(controllerPos);
             if (be instanceof StorageControllerBlockEntity controller) {
-                controller.unregisterProcessProbe(pos);
+                controller.unregisterProcessProbe(worldPosition);
             }
 
             isLinked = false;
@@ -256,24 +254,24 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
     // UTILITY METHODS
     // ========================================
 
-    private static boolean isReceivingRedstone(World world, BlockPos pos) {
-        if (world.isReceivingRedstonePower(pos)) return true;
+    private static boolean isReceivingRedstone(Level world, BlockPos pos) {
+        if (world.hasNeighborSignal(pos)) return true;
 
         for (Direction dir : Direction.values()) {
-            BlockPos neighborPos = pos.offset(dir);
+            BlockPos neighborPos = pos.relative(dir);
             BlockState neighborState = world.getBlockState(neighborPos);
 
-            if (neighborState.isOf(Blocks.REDSTONE_WIRE)) {
-                int power = neighborState.get(net.minecraft.block.RedstoneWireBlock.POWER);
+            if (neighborState.is(Blocks.REDSTONE_WIRE)) {
+                int power = neighborState.getValue(net.minecraft.world.level.block.RedStoneWireBlock.POWER);
                 if (power > 0) return true;
             }
 
-            if (neighborState.isOf(Blocks.LEVER) &&
-                    neighborState.get(net.minecraft.block.LeverBlock.POWERED)) {
+            if (neighborState.is(Blocks.LEVER) &&
+                    neighborState.getValue(net.minecraft.world.level.block.LeverBlock.POWERED)) {
                 return true;
             }
 
-            if (world.getEmittedRedstonePower(neighborPos, dir.getOpposite()) > 0) {
+            if (world.getSignal(neighborPos, dir.getOpposite()) > 0) {
                 return true;
             }
         }
@@ -284,17 +282,17 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
     private boolean isValidProcessingMachine(BlockEntity entity, BlockState state) {
         if (!(entity instanceof AbstractFurnaceBlockEntity)) return false;
 
-        return state.isOf(Blocks.FURNACE) ||
-                state.isOf(Blocks.BLAST_FURNACE) ||
-                state.isOf(Blocks.SMOKER);
+        return state.is(Blocks.FURNACE) ||
+                state.is(Blocks.BLAST_FURNACE) ||
+                state.is(Blocks.SMOKER);
     }
 
     private void updateMachineType(BlockState state) {
-        if (state.isOf(Blocks.FURNACE)) {
+        if (state.is(Blocks.FURNACE)) {
             machineType = "Furnace";
-        } else if (state.isOf(Blocks.BLAST_FURNACE)) {
+        } else if (state.is(Blocks.BLAST_FURNACE)) {
             machineType = "Blast Furnace";
-        } else if (state.isOf(Blocks.SMOKER)) {
+        } else if (state.is(Blocks.SMOKER)) {
             machineType = "Smoker";
         } else {
             machineType = "Unknown";
@@ -305,12 +303,12 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         }
     }
 
-    private void notifyPlayers(ServerWorld world, String message, boolean success) {
-        Text text = Text.literal(message).formatted(success ? Formatting.GREEN : Formatting.YELLOW);
+    private void notifyPlayers(ServerLevel world, String message, boolean success) {
+        Component text = Component.literal(message).withStyle(success ? ChatFormatting.GREEN : ChatFormatting.YELLOW);
 
-        for (net.minecraft.server.network.ServerPlayerEntity player : world.getPlayers()) {
-            if (player.squaredDistanceTo(Vec3d.ofCenter(pos)) < 256) {
-                player.sendMessage(text, true);
+        for (net.minecraft.server.level.ServerPlayer player : world.players()) {
+            if (player.distanceToSqr(Vec3.atCenterOf(worldPosition)) < 256) {
+                player.sendOverlayMessage(text);
             }
         }
     }
@@ -327,7 +325,7 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
     @Override
     public void setController(BlockPos controllerPos) {
         this.controllerPos = controllerPos;
-        markDirty();
+        setChanged();
     }
 
     @Override
@@ -337,9 +335,9 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
 
     public ProcessProbeConfig getConfig() {
         if (config == null) {
-            config = new ProcessProbeConfig(this.pos, this.machineType);
+            config = new ProcessProbeConfig(this.worldPosition, this.machineType);
         }
-        config.position = this.pos;
+        config.position = this.worldPosition;
         config.machineType = this.machineType;
         config.itemsProcessed = smeltingProcessor.getItemsProcessed();
         return config;
@@ -347,17 +345,25 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
 
     public void setConfig(ProcessProbeConfig newConfig) {
         this.config = newConfig.copy();
-        this.config.position = this.pos;
+        this.config.position = this.worldPosition;
 
         smeltingProcessor.setItemsProcessed(newConfig.itemsProcessed);
         this.hasBeenConfigured = true;
 
-        markDirty();
+        setChanged();
     }
 
     public boolean addLinkedBlock(BlockPos controllerPos) {
         if (this.controllerPos == null || !this.controllerPos.equals(controllerPos)) {
+            if (level != null) {
+                disconnect(level); // leave the previous controller, if any
+            }
             setController(controllerPos);
+            // Already powered: link now instead of waiting for the next redstone change
+            if (level != null && isReceivingRedstone(level, worldPosition)) {
+                attemptLink(level, getBlockState());
+                wasRedstonePowered = true;
+            }
             return true;
         }
         return false;
@@ -366,7 +372,7 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
     public void setEnabled(boolean enabled) {
         if (this.enabled != enabled) {
             this.enabled = enabled;
-            markDirty();
+            setChanged();
         }
     }
 
@@ -389,19 +395,18 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         return "§aActive";
     }
 
-    public void collectExperience(PlayerEntity player) {
+    public void collectExperience(Player player) {
         // Experience is automatically sent to controller
-        player.sendMessage(Text.literal("§eExperience is stored in the controller!"), true);
+        player.sendOverlayMessage(Component.literal("§eExperience is stored in the controller!"));
     }
 
     // ========================================
     // NBT SERIALIZATION
     // ========================================
 
-    //? if >=1.21.8 {
     @Override
-    public void writeData(WriteView view) {
-        super.writeData(view);
+    public void saveAdditional(ValueOutput view) {
+        super.saveAdditional(view);
 
         if (controllerPos != null) {
             view.putLong("ControllerPos", controllerPos.asLong());
@@ -430,22 +435,22 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
     }
 
     @Override
-    public void readData(ReadView view) {
-        super.readData(view);
+    public void loadAdditional(ValueInput view) {
+        super.loadAdditional(view);
 
-        view.getOptionalLong("ControllerPos").ifPresent(posLong ->
-                this.controllerPos = BlockPos.fromLong(posLong)
+        view.getLong("ControllerPos").ifPresent(posLong ->
+                this.controllerPos = BlockPos.of(posLong)
         );
-        view.getOptionalLong("TargetMachine").ifPresent(posLong ->
-                this.targetMachinePos = BlockPos.fromLong(posLong)
+        view.getLong("TargetMachine").ifPresent(posLong ->
+                this.targetMachinePos = BlockPos.of(posLong)
         );
 
-        this.enabled = view.getBoolean("Enabled", false);
-        smeltingProcessor.setItemsProcessed(view.getInt("Processed", 0));
-        this.machineType = view.getString("MachineType", "None");
-        this.wasRedstonePowered = view.getBoolean("WasRedstonePowered", false);
-        this.isLinked = view.getBoolean("IsLinked", false);
-        this.hasBeenConfigured = view.getBoolean("HasBeenConfigured", false);
+        this.enabled = view.getBooleanOr("Enabled", false);
+        smeltingProcessor.setItemsProcessed(view.getIntOr("Processed", 0));
+        this.machineType = view.getStringOr("MachineType", "None");
+        this.wasRedstonePowered = view.getBooleanOr("WasRedstonePowered", false);
+        this.isLinked = view.getBooleanOr("IsLinked", false);
+        this.hasBeenConfigured = view.getBooleanOr("HasBeenConfigured", false);
 
         if (this.isLinked && this.controllerPos != null) {
             this.needsInitialLink = true;
@@ -453,93 +458,21 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         }
 
         if (hasBeenConfigured) {
-            this.config = new ProcessProbeConfig(this.pos, this.machineType);
-            config.customName = view.getString("Config_CustomName", null);
-            config.enabled = view.getBoolean("Config_Enabled", true);
+            this.config = new ProcessProbeConfig(this.worldPosition, this.machineType);
+            config.customName = view.getStringOr("Config_CustomName", null);
+            config.enabled = view.getBooleanOr("Config_Enabled", true);
             config.recipeFilter = RecipeFilterMode.fromString(
-                    view.getString("Config_RecipeFilter", "ORES_ONLY")
+                    view.getStringOr("Config_RecipeFilter", "ORES_ONLY")
             );
             config.fuelFilter = FuelFilterMode.fromString(
-                    view.getString("Config_FuelFilter", "COAL_ONLY")
+                    view.getStringOr("Config_FuelFilter", "COAL_ONLY")
             );
-            config.itemsProcessed = view.getInt("Config_ItemsProcessed", smeltingProcessor.getItemsProcessed());
-            config.index = view.getInt("Config_Index", 0);
+            config.itemsProcessed = view.getIntOr("Config_ItemsProcessed", smeltingProcessor.getItemsProcessed());
+            config.index = view.getIntOr("Config_Index", 0);
         } else {
-            this.config = new ProcessProbeConfig(this.pos, this.machineType);
+            this.config = new ProcessProbeConfig(this.worldPosition, this.machineType);
         }
     }
-    //?} else {
-    /*@Override
-    protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
-        super.writeNbt(nbt, registryLookup);
-
-        if (controllerPos != null) {
-            nbt.putLong("ControllerPos", controllerPos.asLong());
-        }
-        if (targetMachinePos != null) {
-            nbt.putLong("TargetMachine", targetMachinePos.asLong());
-        }
-
-        nbt.putBoolean("Enabled", enabled);
-        nbt.putInt("Processed", smeltingProcessor.getItemsProcessed());
-        nbt.putString("MachineType", machineType);
-        nbt.putBoolean("WasRedstonePowered", wasRedstonePowered);
-        nbt.putBoolean("IsLinked", isLinked);
-        nbt.putBoolean("HasBeenConfigured", hasBeenConfigured);
-
-        if (this.isLinked && this.controllerPos != null) {
-            this.needsInitialLink = true;
-            this.isLinked = false; // Reset until re-linked
-        }
-
-        if (config != null && hasBeenConfigured) {
-            if (config.customName != null) {
-                nbt.putString("Config_CustomName", config.customName);
-            }
-            nbt.putBoolean("Config_Enabled", config.enabled);
-            nbt.putString("Config_RecipeFilter", config.recipeFilter.asString());
-            nbt.putString("Config_FuelFilter", config.fuelFilter.asString());
-            nbt.putInt("Config_ItemsProcessed", config.itemsProcessed);
-            nbt.putInt("Config_Index", config.index);
-        }
-    }
-
-    @Override
-    protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
-        super.readNbt(nbt, registryLookup);
-
-        if (nbt.contains("ControllerPos")) {
-            this.controllerPos = BlockPos.fromLong(nbt.getLong("ControllerPos"));
-        }
-        if (nbt.contains("TargetMachine")) {
-            this.targetMachinePos = BlockPos.fromLong(nbt.getLong("TargetMachine"));
-        }
-
-        this.enabled = nbt.getBoolean("Enabled");
-        smeltingProcessor.setItemsProcessed(nbt.getInt("Processed"));
-        this.machineType = nbt.contains("MachineType") ? nbt.getString("MachineType") : "None";
-        this.wasRedstonePowered = nbt.getBoolean("WasRedstonePowered");
-        this.isLinked = nbt.getBoolean("IsLinked");
-        this.hasBeenConfigured = nbt.getBoolean("HasBeenConfigured");
-
-        if (hasBeenConfigured) {
-            this.config = new ProcessProbeConfig(this.pos, this.machineType);
-            config.customName = nbt.contains("Config_CustomName") ? nbt.getString("Config_CustomName") : null;
-            config.enabled = nbt.contains("Config_Enabled") ? nbt.getBoolean("Config_Enabled") : true;
-            config.recipeFilter = RecipeFilterMode.fromString(
-                nbt.contains("Config_RecipeFilter") ? nbt.getString("Config_RecipeFilter") : "ORES_ONLY"
-            );
-            config.fuelFilter = FuelFilterMode.fromString(
-                nbt.contains("Config_FuelFilter") ? nbt.getString("Config_FuelFilter") : "COAL_ONLY"
-            );
-            config.itemsProcessed = nbt.contains("Config_ItemsProcessed") ?
-                nbt.getInt("Config_ItemsProcessed") : smeltingProcessor.getItemsProcessed();
-            config.index = nbt.contains("Config_Index") ? nbt.getInt("Config_Index") : 0;
-        } else {
-            this.config = new ProcessProbeConfig(this.pos, this.machineType);
-        }
-    }
-    *///?}
 
     // ========================================
     // CLEANUP
@@ -547,17 +480,17 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
 
     public void onRemoved() {
         // Grab config from controller before it's gone
-        if (world != null && !world.isClient() && controllerPos != null) {
-            BlockEntity be = world.getBlockEntity(controllerPos);
+        if (level != null && !level.isClientSide() && controllerPos != null) {
+            BlockEntity be = level.getBlockEntity(controllerPos);
             if (be instanceof StorageControllerBlockEntity controller) {
-                ProcessProbeConfig controllerConfig = controller.getProbeConfig(pos);
+                ProcessProbeConfig controllerConfig = controller.getProbeConfig(worldPosition);
                 if (controllerConfig != null) {
                     this.config = controllerConfig.copy();
                     this.hasBeenConfigured = true;
-                    markDirty();
+                    setChanged();
                 }
 
-                controller.unregisterProcessProbe(pos);
+                controller.unregisterProcessProbe(worldPosition);
             }
         }
 
@@ -571,10 +504,10 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
 
     public void clearController() {
         // BEFORE clearing, ensure config is saved locally
-        if (world != null && controllerPos != null) {
-            BlockEntity be = world.getBlockEntity(controllerPos);
+        if (level != null && controllerPos != null) {
+            BlockEntity be = level.getBlockEntity(controllerPos);
             if (be instanceof StorageControllerBlockEntity controller) {
-                ProcessProbeConfig controllerConfig = controller.getProbeConfig(pos);
+                ProcessProbeConfig controllerConfig = controller.getProbeConfig(worldPosition);
                 if (controllerConfig != null) {
                     // Save the controller's config locally before unlinking
                     this.config = controllerConfig.copy();
@@ -586,15 +519,22 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         this.controllerPos = null;
         this.isLinked = false;
 
-        markDirty();
+        setChanged();
 
-        if (world != null) {
-            BlockState state = world.getBlockState(pos);
-            world.updateListeners(pos, state, state, 3);
+        if (level != null) {
+            BlockState state = level.getBlockState(worldPosition);
+            level.sendBlockUpdated(worldPosition, state, state, 3);
         }
     }
 
     public boolean hasBeenConfigured() {
         return hasBeenConfigured;
+    }
+
+    /** Runs before the block entity is removed, for every kind of removal. */
+    @Override
+    public void preRemoveSideEffects(BlockPos pos, BlockState state) {
+        super.preRemoveSideEffects(pos, state);
+        onRemoved();
     }
 }

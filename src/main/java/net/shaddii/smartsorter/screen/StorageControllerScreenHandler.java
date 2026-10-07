@@ -3,20 +3,20 @@ package net.shaddii.smartsorter.screen;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.screen.slot.SlotActionType;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.Container;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
@@ -32,7 +32,7 @@ import java.util.*;
  * - Batched operations
  * - Cached expensive calculations
  */
-public class StorageControllerScreenHandler extends ScreenHandler {
+public class StorageControllerScreenHandler extends AbstractContainerMenu {
     // ========================================
     // CONSTANTS - OPTIMIZED
     // ========================================
@@ -80,15 +80,15 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     // CONSTRUCTORS
     // ========================================
 
-    public StorageControllerScreenHandler(int syncId, PlayerInventory inv, StorageControllerBlockEntity controller) {
+    public StorageControllerScreenHandler(int syncId, Inventory inv, StorageControllerBlockEntity controller) {
         super(SmartSorter.STORAGE_CONTROLLER_SCREEN_HANDLER, syncId);
         this.controller = controller;
-        this.controllerPos = controller != null ? controller.getPos() : null;
+        this.controllerPos = controller != null ? controller.getBlockPos() : null;
 
         addPlayerInventory(inv);
         addPlayerHotbar(inv);
 
-        if (inv.player instanceof ServerPlayerEntity sp) {
+        if (inv.player instanceof ServerPlayer sp) {
             // OPTIMIZATION: Only update cache once on GUI open
             if (controller != null) {
                 controller.forceUpdateCache();
@@ -102,7 +102,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         }
     }
 
-    public StorageControllerScreenHandler(int syncId, PlayerInventory inv) {
+    public StorageControllerScreenHandler(int syncId, Inventory inv) {
         super(SmartSorter.STORAGE_CONTROLLER_SCREEN_HANDLER, syncId);
         this.controller = null;
         this.controllerPos = null;
@@ -117,7 +117,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     // INVENTORY SETUP
     // ========================================
 
-    private void addPlayerInventory(PlayerInventory inv) {
+    private void addPlayerInventory(Inventory inv) {
         for (int row = 0; row < 3; ++row) {
             for (int col = 0; col < 9; ++col) {
                 this.addSlot(new Slot(inv, col + row * 9 + 9, 8 + col * 18, PLAYER_INV_Y + row * 18));
@@ -125,7 +125,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         }
     }
 
-    private void addPlayerHotbar(PlayerInventory inv) {
+    private void addPlayerHotbar(Inventory inv) {
         for (int col = 0; col < 9; ++col) {
             this.addSlot(new Slot(inv, col, 8 + col * 18, HOTBAR_Y));
         }
@@ -136,17 +136,17 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     // ========================================
 
     @Override
-    public ItemStack quickMove(PlayerEntity player, int slotIndex) {
+    public ItemStack quickMoveStack(Player player, int slotIndex) {
         if (slotIndex < 0 || slotIndex >= this.slots.size()) {
             return ItemStack.EMPTY;
         }
 
         Slot slot = this.slots.get(slotIndex);
-        if (slot == null || !slot.hasStack()) {
+        if (slot == null || !slot.hasItem()) {
             return ItemStack.EMPTY;
         }
 
-        ItemStack stackInSlot = slot.getStack();
+        ItemStack stackInSlot = slot.getItem();
         ItemStack original = stackInSlot.copy();
 
         if (slotIndex >= 0 && slotIndex < TOTAL_SLOTS) {
@@ -158,11 +158,11 @@ public class StorageControllerScreenHandler extends ScreenHandler {
             int inserted = stackInSlot.getCount() - (remaining.isEmpty() ? 0 : remaining.getCount());
 
             if (inserted > 0) {
-                slot.setStack(remaining);
-                slot.markDirty();
+                slot.setByPlayer(remaining);
+                slot.setChanged();
 
                 // FIXED: Immediate sync for shift-click
-                if (player instanceof ServerPlayerEntity sp) {
+                if (player instanceof ServerPlayer sp) {
                     requestImmediateSync(sp);
                 }
 
@@ -174,21 +174,21 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     }
 
     @Override
-    public void onSlotClick(int index, int button, SlotActionType type, PlayerEntity player) {
+    public void clicked(int index, int button, ContainerInput type, Player player) {
         if (index < 0 || index >= this.slots.size()) {
-            super.onSlotClick(index, button, type, player);
+            super.clicked(index, button, type, player);
             return;
         }
 
-        super.onSlotClick(index, button, type, player);
+        super.clicked(index, button, type, player);
 
         // OPTIMIZATION: Removed sendNetworkUpdate() - not needed for player inventory operations
         // The controller's tick() will handle cache updates automatically
     }
 
     @Override
-    public boolean canUse(PlayerEntity player) {
-        return controller == null || controller.canPlayerUse(player);
+    public boolean stillValid(Player player) {
+        return controller == null || controller.stillValid(player);
     }
 
     // ========================================
@@ -199,7 +199,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
      * CRITICAL OPTIMIZATION: Removed controller.updateNetworkCache() call
      * The controller's tick() already handles cache updates
      */
-    public void sendNetworkUpdate(ServerPlayerEntity player) {
+    public void sendNetworkUpdate(ServerPlayer player) {
         if (controller == null) return;
 
         this.needsFullSync = true;
@@ -232,7 +232,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     /**
      * OPTIMIZED: Delta updates only
      */
-    public void sendNetworkUpdate(ServerPlayerEntity player, Map<ItemVariant, Long> changes) {
+    public void sendNetworkUpdate(ServerPlayer player, Map<ItemVariant, Long> changes) {
         if (controller == null) return;
 
         if (this.needsFullSync) {
@@ -249,13 +249,13 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     /**
      * FIXED: Immediate sync for critical operations
      */
-    public void requestImmediateSync(ServerPlayerEntity player) {
+    public void requestImmediateSync(ServerPlayer player) {
         if (controller == null || player == null) return;
         sendNetworkUpdate(player);
     }
 
-    private <T, P extends net.minecraft.network.packet.CustomPayload> void sendConfigsInBatches(
-            ServerPlayerEntity player,
+    private <T, P extends net.minecraft.network.protocol.common.custom.CustomPacketPayload> void sendConfigsInBatches(
+            ServerPlayer player,
             Map<BlockPos, T> configs,
             java.util.function.Function<Map<BlockPos, T>, P> payloadFactory) {
 
@@ -412,13 +412,13 @@ public class StorageControllerScreenHandler extends ScreenHandler {
 
     public void requestExtraction(ItemVariant variant, int amount, boolean toInventory) {
         if (controller != null) {
-            PlayerEntity player = getPlayerFromSlots();
+            Player player = getPlayerFromSlots();
             if (player != null) {
                 extractItem(variant, amount, toInventory, player);
 
                 // FIXED: Immediate sync for extractions
-                if (player instanceof ServerPlayerEntity sp) {
-                    player.currentScreenHandler.setCursorStack(getCursorStack());
+                if (player instanceof ServerPlayer sp) {
+                    player.containerMenu.setCarried(getCarried());
                 }
             }
         } else {
@@ -428,13 +428,13 @@ public class StorageControllerScreenHandler extends ScreenHandler {
 
     public void requestDeposit(ItemStack stack, int amount) {
         if (controller != null) {
-            PlayerEntity player = getPlayerFromSlots();
+            Player player = getPlayerFromSlots();
             if (player != null) {
                 depositItem(stack, amount, player);
 
                 // FIXED: Immediate sync for deposits
-                if (player instanceof ServerPlayerEntity sp) {
-                    player.playerScreenHandler.setCursorStack(getCursorStack());
+                if (player instanceof ServerPlayer sp) {
+                    player.inventoryMenu.setCarried(getCarried());
                 }
             }
         } else {
@@ -442,7 +442,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         }
     }
 
-    public void extractItem(ItemVariant variant, int amount, boolean toInventory, PlayerEntity player) {
+    public void extractItem(ItemVariant variant, int amount, boolean toInventory, Player player) {
         if (controller == null || player == null) return;
 
         // Validate against actual network contents
@@ -459,48 +459,48 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         controller.forceUpdateCache();
 
         if (toInventory) {
-            player.getInventory().insertStack(extracted);
+            player.getInventory().add(extracted);
             if (!extracted.isEmpty()) {
-                player.dropItem(extracted, false);
+                player.drop(extracted, false);
             }
         } else {
-            ItemStack cursor = getCursorStack();
+            ItemStack cursor = getCarried();
 
             if (cursor.isEmpty()) {
-                setCursorStack(extracted);
-            } else if (ItemStack.areItemsAndComponentsEqual(cursor, extracted)) {
-                int maxStack = Math.min(cursor.getMaxCount(), 64);
+                setCarried(extracted);
+            } else if (ItemStack.isSameItemSameComponents(cursor, extracted)) {
+                int maxStack = Math.min(cursor.getMaxStackSize(), 64);
                 int canAdd = maxStack - cursor.getCount();
                 if (canAdd > 0) {
                     int toAdd = Math.min(canAdd, extracted.getCount());
-                    cursor.increment(toAdd);
-                    extracted.decrement(toAdd);
-                    setCursorStack(cursor);
+                    cursor.grow(toAdd);
+                    extracted.shrink(toAdd);
+                    setCarried(cursor);
                 }
                 if (!extracted.isEmpty()) {
                     ItemStack remaining = controller.insertItem(extracted).remainder();
                     if (!remaining.isEmpty()) {
-                        player.dropItem(remaining, false);
+                        player.drop(remaining, false);
                     }
                 }
             } else {
-                if (!player.getInventory().insertStack(extracted)) {
-                    player.dropItem(extracted, false);
+                if (!player.getInventory().add(extracted)) {
+                    player.drop(extracted, false);
                 }
             }
         }
 
         // Sync cursor to client
-        if (player instanceof ServerPlayerEntity sp) {
-            player.currentScreenHandler.setCursorStack(getCursorStack());
+        if (player instanceof ServerPlayer sp) {
+            player.containerMenu.setCarried(getCarried());
             sendNetworkUpdate(sp);
         }
     }
 
-    public void depositItem(ItemStack stack, int amount, PlayerEntity player) {
+    public void depositItem(ItemStack stack, int amount, Player player) {
         if (controller == null || player == null || stack.isEmpty()) return;
 
-        ItemStack cursor = getCursorStack();
+        ItemStack cursor = getCarried();
         if (cursor.isEmpty()) return;
 
         ItemStack toDeposit = cursor.copy();
@@ -510,11 +510,11 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         int deposited = toDeposit.getCount() - (remaining.isEmpty() ? 0 : remaining.getCount());
 
         if (deposited > 0) {
-            cursor.decrement(deposited);
-            setCursorStack(cursor.isEmpty() ? ItemStack.EMPTY : cursor);
+            cursor.shrink(deposited);
+            setCarried(cursor.isEmpty() ? ItemStack.EMPTY : cursor);
 
-            if (player instanceof ServerPlayerEntity sp) {
-                player.playerScreenHandler.setCursorStack(getCursorStack());
+            if (player instanceof ServerPlayer sp) {
+                player.inventoryMenu.setCarried(getCarried());
                 // controller.forceUpdateCache();
                 sendNetworkUpdate(sp);
             }
@@ -526,7 +526,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     // ========================================
 
     private int calculateChestFullness(BlockPos chestPos) {
-        if (controller == null || controller.getWorld() == null) return -1;
+        if (controller == null || controller.getLevel() == null) return -1;
         return controller.calculateChestFullness(chestPos);
     }
 
@@ -534,15 +534,15 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         if (controller == null) return new ArrayList<>();
 
         for (BlockPos probePos : controller.getLinkedProbes()) {
-            BlockEntity be = controller.getWorld().getBlockEntity(probePos);
+            BlockEntity be = controller.getLevel().getBlockEntity(probePos);
             if (be instanceof OutputProbeBlockEntity probe) {
                 if (chestPos.equals(probe.getTargetPos())) {
-                    Inventory inv = probe.getTargetInventory();
+                    Container inv = probe.getTargetInventory();
                     if (inv == null) break;
 
                     List<ItemStack> items = new ArrayList<>();
-                    for (int i = 0; i < inv.size() && items.size() < 8; i++) {
-                        ItemStack stack = inv.getStack(i);
+                    for (int i = 0; i < inv.getContainerSize() && items.size() < 8; i++) {
+                        ItemStack stack = inv.getItem(i);
                         if (!stack.isEmpty()) {
                             items.add(stack.copy());
                         }
@@ -566,8 +566,8 @@ public class StorageControllerScreenHandler extends ScreenHandler {
 
         controller.updateChestConfig(chestPos, config);
 
-        PlayerEntity player = getPlayerFromSlots();
-        if (player instanceof ServerPlayerEntity sp) {
+        Player player = getPlayerFromSlots();
+        if (player instanceof ServerPlayer sp) {
             markConfigsDirty();
             requestImmediateSync(sp); // Batched instead of immediate
         }
@@ -581,8 +581,8 @@ public class StorageControllerScreenHandler extends ScreenHandler {
 
         controller.removeChestConfig(chestPos);
 
-        PlayerEntity player = getPlayerFromSlots();
-        if (player instanceof ServerPlayerEntity sp) {
+        Player player = getPlayerFromSlots();
+        if (player instanceof ServerPlayer sp) {
             markConfigsDirty();
             requestImmediateSync(sp); // Batched instead of immediate
         }
@@ -597,8 +597,8 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         config.simplePrioritySelection = simplePriority;
         controller.updateChestConfig(chestPos, config);
 
-        PlayerEntity player = getPlayerFromSlots();
-        if (player instanceof ServerPlayerEntity sp) {
+        Player player = getPlayerFromSlots();
+        if (player instanceof ServerPlayer sp) {
             requestImmediateSync(sp); // Batched instead of immediate
         }
     }
@@ -613,8 +613,8 @@ public class StorageControllerScreenHandler extends ScreenHandler {
             Map<BlockPos, ChestConfig> updatedConfigs = controller.getChestConfigs();
             updateChestConfigs(updatedConfigs);
 
-            PlayerEntity player = getPlayerFromSlots();
-            if (player instanceof ServerPlayerEntity sp) {
+            Player player = getPlayerFromSlots();
+            if (player instanceof ServerPlayer sp) {
                 markConfigsDirty();
                 sendConfigsInBatches(sp, updatedConfigs, ChestConfigBatchPayload::new);
             }
@@ -646,15 +646,15 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     // HELPER METHODS
     // ========================================
 
-    private PlayerInventory getFirstPlayerInventory() {
+    private Inventory getFirstPlayerInventory() {
         for (Slot s : this.slots) {
-            if (s.inventory instanceof PlayerInventory pi) return pi;
+            if (s.container instanceof Inventory pi) return pi;
         }
         return null;
     }
 
-    private PlayerEntity getPlayerFromSlots() {
-        PlayerInventory pi = getFirstPlayerInventory();
+    private Player getPlayerFromSlots() {
+        Inventory pi = getFirstPlayerInventory();
         return pi != null ? pi.player : null;
     }
 
@@ -662,55 +662,55 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     // NETWORK PAYLOAD DEFINITIONS
     // ========================================
 
-    public record SyncRequestPayload() implements CustomPayload {
-        public static final Id<SyncRequestPayload> ID =
-                new Id<>(Identifier.of(SmartSorter.MOD_ID, "sync_request"));
-        public static final PacketCodec<RegistryByteBuf, SyncRequestPayload> CODEC =
-                PacketCodec.of((b, p) -> {}, b -> new SyncRequestPayload());
+    public record SyncRequestPayload() implements CustomPacketPayload {
+        public static final Type<SyncRequestPayload> ID =
+                new Type<>(Identifier.fromNamespaceAndPath(SmartSorter.MOD_ID, "sync_request"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, SyncRequestPayload> CODEC =
+                StreamCodec.ofMember((b, p) -> {}, b -> new SyncRequestPayload());
 
         @Override
-        public Id<? extends CustomPayload> getId() {
+        public Type<? extends CustomPacketPayload> type() {
             return ID;
         }
     }
 
-    public record DepositRequestPayload(ItemVariant variant, int amount) implements CustomPayload {
-        public static final Id<DepositRequestPayload> ID =
-                new Id<>(Identifier.of(SmartSorter.MOD_ID, "deposit_request"));
-        public static final PacketCodec<RegistryByteBuf, DepositRequestPayload> CODEC =
-                PacketCodec.of((value, buf) -> write(buf, value), buf -> read(buf));
+    public record DepositRequestPayload(ItemVariant variant, int amount) implements CustomPacketPayload {
+        public static final Type<DepositRequestPayload> ID =
+                new Type<>(Identifier.fromNamespaceAndPath(SmartSorter.MOD_ID, "deposit_request"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, DepositRequestPayload> CODEC =
+                StreamCodec.ofMember((value, buf) -> write(buf, value), buf -> read(buf));
 
-        public static void write(RegistryByteBuf buf, DepositRequestPayload payload) {
-            ItemStack.PACKET_CODEC.encode(buf, payload.variant().toStack(1));
+        public static void write(RegistryFriendlyByteBuf buf, DepositRequestPayload payload) {
+            ItemStack.STREAM_CODEC.encode(buf, payload.variant().toStack(1));
             buf.writeVarInt(payload.amount());
         }
 
-        public static DepositRequestPayload read(RegistryByteBuf buf) {
-            ItemStack s = ItemStack.PACKET_CODEC.decode(buf);
+        public static DepositRequestPayload read(RegistryFriendlyByteBuf buf) {
+            ItemStack s = ItemStack.STREAM_CODEC.decode(buf);
             return new DepositRequestPayload(ItemVariant.of(s), buf.readVarInt());
         }
 
         @Override
-        public Id<? extends CustomPayload> getId() {
+        public Type<? extends CustomPacketPayload> type() {
             return ID;
         }
     }
 
     public record ExtractionRequestPayload(ItemVariant variant, int amount, boolean toInventory)
-            implements CustomPayload {
-        public static final Id<ExtractionRequestPayload> ID =
-                new Id<>(Identifier.of(SmartSorter.MOD_ID, "extraction_request"));
-        public static final PacketCodec<RegistryByteBuf, ExtractionRequestPayload> CODEC =
-                PacketCodec.of((value, buf) -> write(buf, value), buf -> read(buf));
+            implements CustomPacketPayload {
+        public static final Type<ExtractionRequestPayload> ID =
+                new Type<>(Identifier.fromNamespaceAndPath(SmartSorter.MOD_ID, "extraction_request"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, ExtractionRequestPayload> CODEC =
+                StreamCodec.ofMember((value, buf) -> write(buf, value), buf -> read(buf));
 
-        public static void write(RegistryByteBuf buf, ExtractionRequestPayload payload) {
-            ItemStack.PACKET_CODEC.encode(buf, payload.variant().toStack(1));
+        public static void write(RegistryFriendlyByteBuf buf, ExtractionRequestPayload payload) {
+            ItemStack.STREAM_CODEC.encode(buf, payload.variant().toStack(1));
             buf.writeVarInt(payload.amount());
             buf.writeBoolean(payload.toInventory());
         }
 
-        public static ExtractionRequestPayload read(RegistryByteBuf buf) {
-            ItemStack s = ItemStack.PACKET_CODEC.decode(buf);
+        public static ExtractionRequestPayload read(RegistryFriendlyByteBuf buf) {
+            ItemStack s = ItemStack.STREAM_CODEC.decode(buf);
             ItemVariant v = ItemVariant.of(s);
             int amt = buf.readVarInt();
             boolean inv = buf.readBoolean();
@@ -718,7 +718,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         }
 
         @Override
-        public Id<? extends CustomPayload> getId() {
+        public Type<? extends CustomPacketPayload> type() {
             return ID;
         }
     }
