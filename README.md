@@ -4,7 +4,7 @@ Smart Sorter is a community-maintained fork of slimshaddii’s Smart Sorter Mod.
 
 ![Banner](https://cdn.modrinth.com/data/cached_images/80248f5e084991f304cb77d67af20894746a18ec.png)
 
-**Automated storage for 0-750 chests**
+**Automated storage that will easly sort more then 700 chests**
 
 Smart Sorter connects inputs, storage outputs, and processing machines into one automated network. It routes items, supports prioritized storage, automates furnace and machine inputs and outputs, and collects XP through the Storage Controller.
 
